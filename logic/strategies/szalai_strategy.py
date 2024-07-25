@@ -10,6 +10,7 @@ from models.kline_data import KlineData
 from logic.managers.binance_client_manager import BinanceClientManager
 from logic.managers.binance_websocket_manager import BinanceWebsocketManager
 from configs import szalai_strategy_config
+from threading import Event
 
 class SzalaiStrategy:
     """
@@ -41,6 +42,7 @@ class SzalaiStrategy:
         self.signal_to_set_up_orders: bool = True
         self.signal_to_check_orders: bool = True
         self.signal_to_check_profit: bool = False
+        self.stop_event = Event()
 
     def run_strategy(self) -> None:
         """
@@ -55,7 +57,7 @@ class SzalaiStrategy:
         - Entering a continuous loop where the strategy evaluates signals to manage orders and positions.
 
         The loop will run indefinitely, executing trading logic based on real-time data and internal signals.
-        """
+        """       
         # Log the start of the strategy execution
         self.logger.info("Starting Szalai strategy.")
 
@@ -64,6 +66,7 @@ class SzalaiStrategy:
 
         # Fetch and store the initial account balance to monitor profit or loss later
         self.start_account_balance = self.client_manager.futures_get_account_balance(szalai_strategy_config.ACCOUNT_CURRENCY)
+        self.logger.info(f"Start account balance is {self.start_account_balance} {szalai_strategy_config.ACCOUNT_CURRENCY}.")
 
         # Use a ThreadPoolExecutor to concurrently set the leverage for each trading symbol
         with ThreadPoolExecutor(max_workers=len(szalai_strategy_config.TRADE_SYMBOLS)) as executor:
@@ -86,13 +89,15 @@ class SzalaiStrategy:
             self.__update_order_data_handler           # Handler method to process order data updates
         )
 
-        # Main strategy loop to continuously check and act upon various conditions
-        while True:
+        # Main strategy loop to continuously check and act upon various conditions until the stop event is set
+        while not self.stop_event.is_set():
             # If the signal to check profit is set, evaluate whether the profit target has been reached
             if self.signal_to_check_profit:
                 self.signal_to_check_profit = False
                 self.__is_profit_reached()  # Check if the desired profit level is reached
-                self.__check_side()         # Adjust the trading side if necessary
+
+                if not self.stop_event.is_set(): 
+                    self.__check_side()         # Adjust the trading side if necessary
 
             # If the signal to check orders is set, verify the status of open orders and handle them
             if self.signal_to_check_orders:
@@ -112,6 +117,8 @@ class SzalaiStrategy:
         and orders to halt trading activities.
         """
         self.logger.info("Stopping Szalai strategy.")
+        # Set the stop event to signal the run_strategy loop to exit
+        self.stop_event.set()
         # Stop the WebSocket manager to cease receiving data
         self.websocket_manager.stop_websocket()
         # Close all open positions and orders for all symbols
@@ -134,8 +141,12 @@ class SzalaiStrategy:
             # Filter active orders of certain types and statuses
             active_orders = [order for order in self.order_list if (order.type in ["STOP_MARKET", "TAKE_PROFIT_MARKET"]) and order.status == "NEW"]
             self.logger.debug(f"Active orders: {', '.join(str(order) for order in active_orders)}")
-            if active_orders and len(active_orders) != 2:
-                # If the count of active orders is not as expected, set up new orders
+
+            # If there are no active orders, set up new orders
+            if not active_orders:
+                self.signal_to_set_up_orders = True
+            # If the count of active orders is not as expected, set up new orders
+            elif len(active_orders) != 2:              
                 self.signal_to_set_up_orders = True
                 current_symbol = next(order for order in self.order_list if order.status == "NEW").symbol
                 self.logger.debug("Active orders count is not equal to 2.")
@@ -153,10 +164,10 @@ class SzalaiStrategy:
         self.logger.info(f"Current account balance is {current_account_balance}.")
         # Calculate the change in account balance
         account_balance_change = current_account_balance / self.start_account_balance
-        self.logger.info(f"Account balance change is {account_balance_change}.")
+        self.logger.info(f"Account balance change is {account_balance_change - 1}.")
         # Check if the change exceeds the maximum allowed
         if abs(account_balance_change - 1) > szalai_strategy_config.MAX_ACCOUNT_BALANCE_CHANGE:
-            self.logger.info(f"Max account balance change has been reached, MAX_ACCOUNT_BALANCE_CHANGE: {szalai_strategy_config.MAX_ACCOUNT_BALANCE_CHANGE}")
+            self.logger.info(f"Max account balance change of {szalai_strategy_config.MAX_ACCOUNT_BALANCE_CHANGE} has been reached.")
             # Stop the strategy if the change exceeds the limit
             self.stop_strategy()
 
@@ -188,30 +199,45 @@ class SzalaiStrategy:
         - Concurrently creating a position order, stop loss order, and take profit order
         - Adding these orders to the list and handling any exceptions that may occur
         """
-        self.logger.info(f"Setting up orders, quantity: {quantity}, side: {side.name}.")
-        try:
-            trading_symbol = self.__get_most_volatile_symbol()
 
-            with ThreadPoolExecutor(max_workers=3) as executor:
-                # Create the position order
-                future_position = executor.submit(self.__create_position_order, trading_symbol.symbol, quantity, side)
-                position_order = future_position.result()
+        # Get the most volatile symbol to trade on
+        trading_symbol = self.__get_most_volatile_symbol()
 
-                # Create the stop loss and take profit orders
-                future_stop_loss = executor.submit(self.__create_stop_loss_order, trading_symbol.symbol, position_order.average_price, side)
-                future_take_profit = executor.submit(self.__create_take_profit_order, trading_symbol.symbol, position_order.average_price, side)
-                stop_loss_order = future_stop_loss.result()
-                take_profit_order = future_take_profit.result()
+        # Check if the volatility change exceeds the minimum threshold
+        if trading_symbol.change > szalai_strategy_config.MIN_CHANGE:
+            self.logger.info(f"Most volatile symbol {trading_symbol.symbol} has a change of {trading_symbol.change}.")
+            self.logger.info(f"Setting up orders, quantity: {quantity}, side: {side.name}.")
+            try:
+                
+                with ThreadPoolExecutor(max_workers=3) as executor:
+                    # Create the position order
+                    future_position = executor.submit(self.__create_position_order, trading_symbol.symbol, quantity, side)
+                    position_order = future_position.result()
 
-                # Extend the order list with the newly created orders
-                self.order_list.extend([position_order, stop_loss_order, take_profit_order])
-        except Exception as e:
-            # Log any errors encountered during order setup
-            self.logger.exception("Error at setting up orders.", exc_info=True)
-            # Cancel any outstanding futures if an error occurs
-            future_position.cancel()
-            future_stop_loss.cancel()
-            future_take_profit.cancel()
+                    # Create the stop loss and take profit orders
+                    future_stop_loss = executor.submit(self.__create_stop_loss_order, trading_symbol.symbol, position_order.average_price, side)
+                    future_take_profit = executor.submit(self.__create_take_profit_order, trading_symbol.symbol, position_order.average_price, side)
+                    stop_loss_order = future_stop_loss.result()
+                    take_profit_order = future_take_profit.result()
+
+                    # Extend the order list with the newly created orders
+                    self.order_list.extend([position_order, stop_loss_order, take_profit_order])
+            except Exception as e:
+                # Log any errors encountered during order setup
+                self.logger.error(f"Error while setting up orders, {str(e)}")
+                self.logger.debug("Error while setting up orders:", exc_info=True)
+                # Cancel any outstanding futures if an error occurs
+                future_position.cancel()
+                future_stop_loss.cancel()
+                future_take_profit.cancel()
+                # Set the signal to set up orders for new orders
+                self.signal_to_set_up_orders = True
+
+        else:
+            self.logger.warning(
+                f"The most volatile symbol {trading_symbol.symbol} has a change of {trading_symbol.change}, "
+                f"which does not reach the configured minimum change of {szalai_strategy_config.MIN_CHANGE}."
+            )
 
     def __close_open_positions_and_orders_for_all_symbols(self) -> None:
         """
@@ -278,8 +304,11 @@ class SzalaiStrategy:
 
             if kline_data.is_closed:
                 self.logger.info(f"Kline data has been updated, {kline_data}.")
+                self.signal_to_check_orders = True
+                self.logger.debug("Signal to check orders has been set to True.")
             else:
                 self.logger.debug(f"Kline data has been updated, {kline_data}.")
+
 
     def __update_order_data_handler(self, message: str) -> None:
         """
@@ -296,7 +325,7 @@ class SzalaiStrategy:
             status = message.get("o").get("X")
             order = next(order for order in self.order_list if order.client_order_id == client_order_id)
             order.status = status
-            self.logger.info(f"Order has been updated, {order}.")
+            self.logger.debug(f"Order has been updated, {order}.")
 
             if (order.type in ["STOP_MARKET", "TAKE_PROFIT_MARKET"]) and order.status == "FILLED":
                 self.logger.info(f"{order.type} order has been filled, {order}.")

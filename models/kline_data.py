@@ -76,9 +76,9 @@ class KlineData:
         return (
             f"symbol: {self.symbol}, "
             f"interval: {self.interval}, "
-            f"open price: {self.open_price}, "
-            f"close price: {self.close_price}, "
-            f"high price: {self.high_price}, "
-            f"low price: {self.low_price}, "
-            f"is closed: {self.is_closed}"
+            f"open_price: {self.open_price}, "
+            f"close_price: {self.close_price}, "
+            f"high_price: {self.high_price}, "
+            f"low_price: {self.low_price}, "
+            f"is_closed: {self.is_closed}"
         )

@@ -10,9 +10,10 @@ BAR_INTERVAL = "1m"
 # Minimum percentage change in price to consider for volatility calculations
 MIN_CHANGE = 0.1
 
-# Maximum allowable change in account balance before stopping the strategy (e.g., 1%)
-MAX_ACCOUNT_BALANCE_CHANGE = 0.01
+# Maximum allowable change in account balance before stopping the strategy (e.g., 1% = 0.01)
+MAX_ACCOUNT_BALANCE_CHANGE = 0.001
 
+# TODO: hol használjuk fel?
 # Amount of USD to risk per trade
 RISK_USD = 10 
 
@@ -26,7 +27,7 @@ LEVERAGE = 1
 START_POSITION = "LONG"  # Options: "LONG" or "SHORT"
 
 # Multiplier for calculating stop loss price, e.g., 0.1% below entry price for long positions
-STOP_LOSS_MULTIPLIER = 0.001
+STOP_LOSS_MULTIPLIER = 0.00001
 
 # Multiplier for calculating take profit price, e.g., 0.1% above entry price for long positions
-TAKE_PROFIT_MULTIPLIER = 0.001
+TAKE_PROFIT_MULTIPLIER = 0.00001

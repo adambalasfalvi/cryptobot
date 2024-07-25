@@ -27,7 +27,7 @@ class BinanceClientManager():
         Returns:
             OrderResponse: Response object containing order details.
         """
-        self.logger.info(f"Creating buy market order, symbol: {symbol}, quantity: {quantity}.")
+        self.logger.debug(f"Creating buy market order, symbol: {symbol}, quantity: {quantity}.")
         response = self.client.futures_create_order(
             symbol=symbol, 
             side=enums.SIDE_BUY, 
@@ -57,7 +57,7 @@ class BinanceClientManager():
         Returns:
             OrderResponse: Response object containing order details.
         """
-        self.logger.info(f"Creating sell market order, symbol: {symbol}, quantity: {quantity}.")
+        self.logger.debug(f"Creating sell market order, symbol: {symbol}, quantity: {quantity}.")
         response = self.client.futures_create_order(
             symbol=symbol, 
             side=enums.SIDE_SELL, 
@@ -87,7 +87,7 @@ class BinanceClientManager():
         Returns:
             OrderResponse: Response object containing order details.
         """
-        self.logger.info(f"Creating buy stop market order, symbol: {symbol}, stop_price: {stop_price}.")
+        self.logger.debug(f"Creating buy stop market order, symbol: {symbol}, stop_price: {stop_price}.")
         response = self.client.futures_create_order(
             symbol=symbol, 
             side=enums.SIDE_BUY, 
@@ -117,7 +117,7 @@ class BinanceClientManager():
         Returns:
             OrderResponse: Response object containing order details.
         """
-        self.logger.info(f"Creating sell stop market order, symbol: {symbol}, stop_price: {stop_price}.")
+        self.logger.debug(f"Creating sell stop market order, symbol: {symbol}, stop_price: {stop_price}.")
         response = self.client.futures_create_order(
             symbol=symbol, 
             side=enums.SIDE_SELL, 
@@ -147,7 +147,7 @@ class BinanceClientManager():
         Returns:
             OrderResponse: Response object containing order details.
         """
-        self.logger.info(f"Creating buy take profit market order, symbol: {symbol}, stop_price: {stop_price}.")
+        self.logger.debug(f"Creating buy take profit market order, symbol: {symbol}, stop_price: {stop_price}.")
         response = self.client.futures_create_order(
             symbol=symbol, 
             side=enums.SIDE_BUY, 
@@ -177,7 +177,7 @@ class BinanceClientManager():
         Returns:
             OrderResponse: Response object containing order details.
         """
-        self.logger.info(f"Creating sell take profit market order, symbol: {symbol}, stop_price: {stop_price}.")
+        self.logger.debug(f"Creating sell take profit market order, symbol: {symbol}, stop_price: {stop_price}.")
         response = self.client.futures_create_order(
             symbol=symbol, 
             side=enums.SIDE_SELL, 
@@ -207,7 +207,7 @@ class BinanceClientManager():
             str: Response from the cancel order request.
         """
         response = self.client.futures_cancel_all_open_orders(symbol=symbol)
-        self.logger.info(f"All open future orders have been cancelled.")
+        self.logger.debug(f"All open future orders have been cancelled.")
         return response
         
     def futures_change_leverage(self, symbol: str, leverage: int) -> str:
@@ -221,7 +221,7 @@ class BinanceClientManager():
             str: Response from the change leverage request.
         """
         response = self.client.futures_change_leverage(symbol=symbol, leverage=leverage)
-        self.logger.info(f"Leverage has been changed to {leverage} for {symbol}.")
+        self.logger.debug(f"Leverage has been changed to {leverage} for {symbol}.")
         return response
 
     def futures_get_account_balance(self, currency: str) -> float:
@@ -233,11 +233,11 @@ class BinanceClientManager():
         Returns:
             float: Account balance for the specified currency.
         """
-        self.logger.info(f"Getting {currency} account balance.")
+        self.logger.debug(f"Getting {currency} account balance.")
         accounts = self.client.futures_account_balance()
         account = next(filter(lambda x: x["asset"] == currency, accounts), None)
         balance = float(account["balance"])
-        self.logger.info(f"Balance is {balance} {currency}.")
+        self.logger.debug(f"Balance is {balance} {currency}.")
         return balance
     
     def futures_get_position_information(self, symbol: str) -> str:
@@ -249,7 +249,7 @@ class BinanceClientManager():
         Returns:
             str: Position information for the specified symbol.
         """
-        self.logger.info(f"Getting asset balance for {symbol}.")
+        self.logger.debug(f"Getting asset balance for {symbol}.")
         response = self.client.futures_position_information(symbol=symbol)
         return response
     
@@ -262,8 +262,8 @@ class BinanceClientManager():
         Returns:
             float: Latest price for the specified symbol.
         """
-        self.logger.info(f"Getting latest price for {symbol}.")
+        self.logger.debug(f"Getting latest price for {symbol}.")
         response = self.client.futures_symbol_ticker(symbol=symbol)
         latest_price = float(response["price"])
-        self.logger.info(f"Latest price for {symbol} is {latest_price}.")
+        self.logger.debug(f"Latest price for {symbol} is {latest_price}.")
         return latest_price

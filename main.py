@@ -1,4 +1,6 @@
 import logging
+import signal
+import sys
 from logic.strategies.szalai_strategy import SzalaiStrategy
 
 def main():
@@ -11,8 +13,7 @@ def main():
     try:   
         szalai_strategy.run_strategy()
     except KeyboardInterrupt:
-        # Log the interruption and stop the strategy
-        logging.info("Cryptobot interrupted by user")  
+        # Stop the strategy
         szalai_strategy.stop_strategy()
 
 # Entry point of the script
