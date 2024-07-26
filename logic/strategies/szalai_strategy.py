@@ -4,6 +4,7 @@ import logging.handlers
 from datetime import datetime
 from logging import Logger
 from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future
 from models.order_response import OrderResponse
 from models.side import Side
 from models.kline_data import KlineData
@@ -35,7 +36,8 @@ class SzalaiStrategy:
         self.client_manager = BinanceClientManager(logger=self.logger)
         self.websocket_manager = BinanceWebsocketManager(logger=self.logger)
         self.side = Side.LONG if szalai_strategy_config.START_POSITION == "LONG" else Side.SHORT
-        self.trading_quantity = szalai_strategy_config.TRADE_QUANTITY
+        self.risk_usd = szalai_strategy_config.RISK_USD
+        #self.trading_quantity = szalai_strategy_config.TRADE_QUANTITY
         self.kline_data_list: list[KlineData] = [KlineData.from_symbol(symbol) for symbol in szalai_strategy_config.TRADE_SYMBOLS]
         self.order_list: list[OrderResponse] = []
         self.start_account_balance: float
@@ -94,20 +96,20 @@ class SzalaiStrategy:
             # If the signal to check profit is set, evaluate whether the profit target has been reached
             if self.signal_to_check_profit:
                 self.signal_to_check_profit = False
-                self.__is_profit_reached()  # Check if the desired profit level is reached
+                self.__is_profit_reached()
 
                 if not self.stop_event.is_set(): 
-                    self.__check_side()         # Adjust the trading side if necessary
+                    self.__check_side()  # Adjust the trading side if necessary
 
             # If the signal to check orders is set, verify the status of open orders and handle them
             if self.signal_to_check_orders:
                 self.signal_to_check_orders = False
-                self.__check_signal_to_order()  # Check and handle signals related to existing orders
+                self.__check_signal_to_order() 
 
             # If the signal to set up new orders is set and all kline data is updated, set up new orders
             if self.signal_to_set_up_orders and all(kline_data.is_updated for kline_data in self.kline_data_list):
                 self.signal_to_set_up_orders = False
-                self.__set_up_orders(self.trading_quantity, self.side)  # Set up new orders based on the current strategy
+                self.__set_up_orders()
 
     def stop_strategy(self) -> None:
         """
@@ -164,7 +166,7 @@ class SzalaiStrategy:
         self.logger.info(f"Current account balance is {current_account_balance}.")
         # Calculate the change in account balance
         account_balance_change = current_account_balance / self.start_account_balance
-        self.logger.info(f"Account balance change is {account_balance_change - 1}.")
+        self.logger.info(f"Account balance change is {account_balance_change}.")
         # Check if the change exceeds the maximum allowed
         if abs(account_balance_change - 1) > szalai_strategy_config.MAX_ACCOUNT_BALANCE_CHANGE:
             self.logger.info(f"Max account balance change of {szalai_strategy_config.MAX_ACCOUNT_BALANCE_CHANGE} has been reached.")
@@ -190,12 +192,13 @@ class SzalaiStrategy:
             self.side = Side.LONG
             self.logger.info(f"Side has been changed to {self.side.name}.")
 
-    def __set_up_orders(self, quantity: float, side: Side) -> None:
+    def __set_up_orders(self) -> None:
         """
         Sets up new orders based on the specified quantity and trading side.
 
         This method handles the creation of new orders by:
         - Determining the most volatile symbol
+        - Calculating the trading quantity
         - Concurrently creating a position order, stop loss order, and take profit order
         - Adding these orders to the list and handling any exceptions that may occur
         """
@@ -205,18 +208,28 @@ class SzalaiStrategy:
 
         # Check if the volatility change exceeds the minimum threshold
         if trading_symbol.change > szalai_strategy_config.MIN_CHANGE:
-            self.logger.info(f"Most volatile symbol {trading_symbol.symbol} has a change of {trading_symbol.change}.")
-            self.logger.info(f"Setting up orders, quantity: {quantity}, side: {side.name}.")
-            try:
-                
+            self.logger.info(f"Most volatile symbol {trading_symbol.symbol} has a change of {round(trading_symbol.change, 2)}.")
+
+            # Calculate the order quantity
+            quantity = self.__calculate_quantity(trading_symbol)
+
+            self.logger.info(f"Setting up orders, quantity: {quantity}, side: {self.side.name}.")
+
+            try:            
                 with ThreadPoolExecutor(max_workers=3) as executor:
+                    
+                    # Initialize futures to None
+                    future_position = None
+                    future_stop_loss = None
+                    future_take_profit = None
+
                     # Create the position order
-                    future_position = executor.submit(self.__create_position_order, trading_symbol.symbol, quantity, side)
+                    future_position = executor.submit(self.__create_position_order, trading_symbol.symbol, quantity, self.side)
                     position_order = future_position.result()
 
                     # Create the stop loss and take profit orders
-                    future_stop_loss = executor.submit(self.__create_stop_loss_order, trading_symbol.symbol, position_order.average_price, side)
-                    future_take_profit = executor.submit(self.__create_take_profit_order, trading_symbol.symbol, position_order.average_price, side)
+                    future_stop_loss = executor.submit(self.__create_stop_loss_order, trading_symbol.symbol, position_order.average_price, self.side)
+                    future_take_profit = executor.submit(self.__create_take_profit_order, trading_symbol.symbol, position_order.average_price, self.side)
                     stop_loss_order = future_stop_loss.result()
                     take_profit_order = future_take_profit.result()
 
@@ -227,17 +240,45 @@ class SzalaiStrategy:
                 self.logger.error(f"Error while setting up orders, {str(e)}")
                 self.logger.debug("Error while setting up orders:", exc_info=True)
                 # Cancel any outstanding futures if an error occurs
-                future_position.cancel()
-                future_stop_loss.cancel()
-                future_take_profit.cancel()
-                # Set the signal to set up orders for new orders
-                self.signal_to_set_up_orders = True
+                if future_position:
+                    future_position.cancel()
+                if future_stop_loss:
+                    future_stop_loss.cancel()
+                if future_take_profit: 
+                    future_take_profit.cancel()
+                # Wait for the next update
+                self.__wait_for_next_kline_update()
 
         else:
             self.logger.warning(
-                f"The most volatile symbol {trading_symbol.symbol} has a change of {trading_symbol.change}, "
+                f"The most volatile symbol {trading_symbol.symbol} has a change of {round(trading_symbol.change, 2)}, "
                 f"which does not reach the configured minimum change of {szalai_strategy_config.MIN_CHANGE}."
             )
+            # If the amount change does not reach the configured threshold, wait for the next update
+            self.__wait_for_next_kline_update()
+    
+    def __wait_for_next_kline_update(self) -> None:
+        """
+        Wait for the next closed kline data update.
+
+        This method set the set up orders signal to True and invalidates all kline data.
+        """
+        self.signal_to_set_up_orders = True
+        for kline_data in self.kline_data_list:
+            kline_data.is_updated = False
+
+    def __calculate_quantity(self, kline_data: KlineData) -> float:
+        """
+        Calculates the trading quantity for a symbol.
+
+        This method calculates the necessary trading quantity from the configured USD amount to risk.
+        """
+        quantity = round(szalai_strategy_config.RISK_USD / kline_data.close_price, 3)
+        self.logger.info(
+            f"The calculated quantity of symbol {kline_data.symbol} " 
+            f"from {szalai_strategy_config.RISK_USD} USD is {quantity}."
+        )
+        return quantity
 
     def __close_open_positions_and_orders_for_all_symbols(self) -> None:
         """
@@ -347,29 +388,29 @@ class SzalaiStrategy:
         else:
             return self.client_manager.futures_create_sell_market_order(symbol, quantity)
 
-    def __create_take_profit_order(self, symbol: str, price: float, side: Side) -> OrderResponse:
+    def __create_take_profit_order(self, symbol: str, position_price: float, side: Side) -> OrderResponse:
         """
         Creates a take profit order for the specified symbol, price, and trading side.
 
         This method calculates the take profit price based on the current price and trading side,
         then creates the appropriate order.
         """
-        self.logger.info(f"Creating take profit order, symbol: {symbol}, price: {price}, side: {side.name}.")
-        tp_price = self.__calculate_take_profit_price(price, side)
+        tp_price = self.__calculate_take_profit_price(position_price, side)
+        self.logger.info(f"Creating take profit order, symbol: {symbol}, price: {tp_price}, side: {side.name}.")
         if self.side == Side.LONG:
             return self.client_manager.futures_create_sell_take_profit_market_order(symbol, tp_price)
         else:
             return self.client_manager.futures_create_buy_take_profit_market_order(symbol, tp_price)
 
-    def __create_stop_loss_order(self, symbol: str, price: float, side: Side) -> OrderResponse:
+    def __create_stop_loss_order(self, symbol: str, position_price: float, side: Side) -> OrderResponse:
         """
         Creates a stop loss order for the specified symbol, price, and trading side.
 
         This method calculates the stop loss price based on the current price and trading side,
         then creates the appropriate order.
         """
-        self.logger.info(f"Creating stop loss order, symbol: {symbol}, price: {price}, side: {side.name}.")
-        sl_price = self.__calculate_stop_loss_price(price, side)
+        sl_price = self.__calculate_stop_loss_price(position_price, side)
+        self.logger.info(f"Creating stop loss order, symbol: {symbol}, position price: {sl_price}, side: {side.name}.")
         if self.side == Side.LONG:
             return self.client_manager.futures_create_sell_stop_market_order(symbol, sl_price)
         else:
