@@ -264,7 +264,7 @@ class SzalaiStrategy:
         """
         self.signal_to_set_up_orders = True
         for kline_data in self.kline_data_list:
-            kline_data.is_updated = False
+            kline_data.is_closed = False
 
     def __calculate_quantity(self, kline_data: KlineData) -> float:
         """
@@ -288,7 +288,7 @@ class SzalaiStrategy:
         - Closes any remaining positions by creating market sell orders
         """
         self.logger.info("Closing all open positions and orders for all symbols.")
-        with ThreadPoolExecutor(max_workers=len(szalai_strategy_config.TRADE_SYMBOLS)) as executor:
+        with ThreadPoolExecutor() as executor:
             for symbol in szalai_strategy_config.TRADE_SYMBOLS:
                 # Cancel all open orders for the symbol
                 executor.submit(self.client_manager.futures_cancel_all_open_orders, symbol)
@@ -343,11 +343,15 @@ class SzalaiStrategy:
             kline_data.is_closed = bool(message["data"]["k"]["x"])
 
             if kline_data.is_closed:
+                pass
                 self.logger.info(f"Kline data has been updated, {kline_data}.")
+            else:
+                pass
+                self.logger.debug(f"Kline data has been updated, {kline_data}.")
+            
+            if all(x.is_closed for x in self.kline_data_list):
                 self.signal_to_check_orders = True
                 self.logger.debug("Signal to check orders has been set to True.")
-            else:
-                self.logger.debug(f"Kline data has been updated, {kline_data}.")
 
 
     def __update_order_data_handler(self, message: str) -> None:
