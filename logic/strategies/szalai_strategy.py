@@ -37,7 +37,6 @@ class SzalaiStrategy:
         self.websocket_manager = BinanceWebsocketManager(logger=self.logger)
         self.side = Side.LONG if szalai_strategy_config.START_POSITION == "LONG" else Side.SHORT
         self.risk_usd = szalai_strategy_config.RISK_USD
-        #self.trading_quantity = szalai_strategy_config.TRADE_QUANTITY
         self.kline_data_list: list[KlineData] = [KlineData.from_symbol(symbol) for symbol in szalai_strategy_config.TRADE_SYMBOLS]
         self.order_list: list[OrderResponse] = []
         self.start_account_balance: float
@@ -289,8 +288,8 @@ class SzalaiStrategy:
         - Closes any remaining positions by creating market sell orders
         """
         self.logger.info("Closing all open positions and orders for all symbols.")
-        for symbol in szalai_strategy_config.TRADE_SYMBOLS:
-            with ThreadPoolExecutor(max_workers=2) as executor:
+        with ThreadPoolExecutor(max_workers=len(szalai_strategy_config.TRADE_SYMBOLS)) as executor:
+            for symbol in szalai_strategy_config.TRADE_SYMBOLS:
                 # Cancel all open orders for the symbol
                 executor.submit(self.client_manager.futures_cancel_all_open_orders, symbol)
 
