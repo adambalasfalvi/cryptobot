@@ -1,13 +1,18 @@
 import sys
 import logging
 import logging.handlers
+import time
+import threading
 from datetime import datetime
+from datetime import timedelta
 from logging import Logger
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import Future
 from models.order_response import OrderResponse
 from models.side import Side
 from models.kline_data import KlineData
+from models.interval import Interval
+from models.symbol import Symbol
 from logic.managers.binance_client_manager import BinanceClientManager
 from logic.managers.binance_websocket_manager import BinanceWebsocketManager
 from configs import szalai_strategy_config
@@ -37,23 +42,28 @@ class SzalaiStrategy:
         self.websocket_manager = BinanceWebsocketManager(logger=self.logger)
         self.side = Side.LONG if szalai_strategy_config.START_POSITION == "LONG" else Side.SHORT
         self.risk_usd = szalai_strategy_config.RISK_USD
+        self.interval = next(interval for interval in Interval if interval.value == szalai_strategy_config.BAR_INTERVAL) 
         self.kline_data_list: list[KlineData] = [KlineData.from_symbol(symbol) for symbol in szalai_strategy_config.TRADE_SYMBOLS]
+        self.symbol_list: list[Symbol] = []
         self.order_list: list[OrderResponse] = []
         self.start_account_balance: float
-        self.signal_to_set_up_orders: bool = True
-        self.signal_to_check_orders: bool = True
-        self.signal_to_check_profit: bool = False
+        self.signal_interval_trigger: bool = False
+        self.signal_set_up_orders: bool = True
+        self.signal_check_orders: bool = True
+        self.signal_check_profit: bool = False
         self.stop_event = Event()
 
-    def run_strategy(self) -> None:
+    def start_strategy(self) -> None:
         """
         Starts the Szalai trading strategy.
 
         This method initializes and runs the trading strategy by:
         - Logging the start of the strategy.
+        - Getting precision informations for symbols
         - Closing any open positions and orders.
         - Fetching the initial account balance.
         - Configuring leverage for each trading symbol.
+        - Starting the interval trigger thread
         - Setting up WebSocket connections for real-time updates on market and user data.
         - Entering a continuous loop where the strategy evaluates signals to manage orders and positions.
 
@@ -61,6 +71,24 @@ class SzalaiStrategy:
         """       
         # Log the start of the strategy execution
         self.logger.info("Starting Szalai strategy.")
+
+        # Get precision informations for symbols
+        with ThreadPoolExecutor() as executor:
+            futures: list[Future] = []
+            for symbol in szalai_strategy_config.TRADE_SYMBOLS:
+                futures.append(executor.submit(self.client_manager.futures_get_symbol_precision_info, symbol))
+
+            for future in futures:
+                symbol_precision_info = future.result()    
+                self.symbol_list.append(
+                    Symbol(
+                        symbol_precision_info["symbol"],
+                        symbol_precision_info["pricePrecision"],
+                        symbol_precision_info["quantityPrecision"],
+                        symbol_precision_info["baseAssetPrecision"],
+                        symbol_precision_info["quotePrecision"]
+                    )
+                )
 
         # Close any existing open positions and orders for all symbols to ensure a clean state
         self.__close_open_positions_and_orders_for_all_symbols()
@@ -74,6 +102,10 @@ class SzalaiStrategy:
             for symbol in szalai_strategy_config.TRADE_SYMBOLS:
                 # Submit a task to change the leverage for each symbol to the configured value
                 executor.submit(self.client_manager.futures_change_leverage, symbol, szalai_strategy_config.LEVERAGE)
+        
+        # Start the interval trigger thread
+        thread = threading.Thread(target=self.__set_interval_trigger)
+        thread.start()
 
         # Start the WebSocket manager to receive real-time updates for market data and user data
         self.websocket_manager.start_websocket()
@@ -81,7 +113,7 @@ class SzalaiStrategy:
         # Set up the WebSocket for futures kline (candlestick) data and provide a handler for updates
         self.websocket_manager.setup_futures_kline_multiplex_websocket(
             szalai_strategy_config.TRADE_SYMBOLS,      # Symbols to monitor
-            szalai_strategy_config.BAR_INTERVAL,       # Interval for kline data (e.g., 1 minute)
+            self.interval.value,       # Interval for kline data (e.g., 1 minute)
             self.__update_kline_data_handler           # Handler method to process kline data updates
         )
 
@@ -93,21 +125,22 @@ class SzalaiStrategy:
         # Main strategy loop to continuously check and act upon various conditions until the stop event is set
         while not self.stop_event.is_set():
             # If the signal to check profit is set, evaluate whether the profit target has been reached
-            if self.signal_to_check_profit:
-                self.signal_to_check_profit = False
+            if self.signal_check_profit:
+                self.signal_check_profit = False
                 self.__is_profit_reached()
 
                 if not self.stop_event.is_set(): 
                     self.__check_side()  # Adjust the trading side if necessary
 
             # If the signal to check orders is set, verify the status of open orders and handle them
-            if self.signal_to_check_orders:
-                self.signal_to_check_orders = False
+            if self.signal_check_orders:
+                self.signal_check_orders = False
                 self.__check_signal_to_order() 
 
-            # If the signal to set up new orders is set and all kline data is updated, set up new orders
-            if self.signal_to_set_up_orders and all(kline_data.is_updated for kline_data in self.kline_data_list):
-                self.signal_to_set_up_orders = False
+            # If the signal to set up new orders and interval trigger is set, set up new orders
+            if self.signal_set_up_orders and self.signal_interval_trigger and all(kline_data.is_not_empty for kline_data in self.kline_data_list):
+                self.signal_set_up_orders = False
+                self.signal_interval_trigger = False
                 self.__set_up_orders()
 
     def stop_strategy(self) -> None:
@@ -125,6 +158,57 @@ class SzalaiStrategy:
         # Close all open positions and orders for all symbols
         self.__close_open_positions_and_orders_for_all_symbols()
 
+    def __calculate_trigger_time(self, server_time: datetime) -> None:
+        """Calculate the next trigger time based on the interval."""
+        if self.interval == Interval.ONE_MINUTE:
+            next_trigger = server_time + timedelta(minutes=1)
+        elif self.interval == Interval.THREE_MINUTES:
+            next_trigger = server_time + timedelta(minutes=3)
+        elif self.interval == Interval.FIVE_MINUTES:
+            next_trigger = server_time + timedelta(minutes=5)
+        elif self.interval == Interval.FIFTEEN_MINUTES:
+            next_trigger = server_time + timedelta(minutes=15)
+        elif self.interval == Interval.THIRTY_MINUTES:
+            next_trigger = server_time + timedelta(minutes=30)
+        elif self.interval == Interval.ONE_HOUR:
+            next_trigger = server_time + timedelta(hours=1)
+        elif self.interval == Interval.TWO_HOURS:
+            next_trigger = server_time + timedelta(hours=2)
+        elif self.interval == Interval.FOUR_HOURS:
+            next_trigger = server_time + timedelta(hours=4)
+        elif self.interval == Interval.SIX_HOURS:
+            next_trigger = server_time + timedelta(hours=6)
+        elif self.interval == Interval.EIGHT_HOURS:
+            next_trigger = server_time + timedelta(hours=8)
+        elif self.interval == Interval.TWELVE_HOURS:
+            next_trigger = server_time + timedelta(hours=12)
+        elif self.interval == Interval.ONE_DAY:
+            next_trigger = server_time + timedelta(days=1)
+        elif self.interval == Interval.THREE_DAYS:
+            next_trigger = server_time + timedelta(days=3)
+        elif self.interval == Interval.ONE_WEEK:
+            next_trigger = server_time + timedelta(weeks=1)
+        elif self.interval == Interval.ONE_MONTH:
+            next_trigger = server_time.replace(day=1) + timedelta(days=32)
+            next_trigger = next_trigger.replace(day=1)
+
+        next_trigger = next_trigger.replace(second=0, microsecond=0)
+        self.logger.debug(f"Next trigger is set to {next_trigger}.")
+        return next_trigger
+    
+    def __set_interval_trigger(self) -> None:
+        """
+        Set the interval trigger at the configured interval.
+        """
+        while not self.stop_event.is_set():
+            server_time = self.client_manager.futures_get_server_time()
+            trigger_time = self.__calculate_trigger_time(server_time)
+            time_to_sleep = (trigger_time - server_time).total_seconds()
+            self.logger.debug(f"Time to sleep: {time_to_sleep} seconds.")
+            time.sleep(time_to_sleep)
+            self.signal_interval_trigger = True
+            self.logger.info(f"The configured {self.interval.value} interval has been triggered.")
+
     def __check_signal_to_order(self) -> None:
         """
         Checks whether there are signals to place new orders.
@@ -137,7 +221,7 @@ class SzalaiStrategy:
         if not self.order_list:
             # If there are no orders, set the flag to prepare new orders
             self.logger.debug("Order list is empty.")
-            self.signal_to_set_up_orders = True
+            self.signal_set_up_orders = True
         else:
             # Filter active orders of certain types and statuses
             active_orders = [order for order in self.order_list if (order.type in ["STOP_MARKET", "TAKE_PROFIT_MARKET"]) and order.status == "NEW"]
@@ -145,10 +229,10 @@ class SzalaiStrategy:
 
             # If there are no active orders, set up new orders
             if not active_orders:
-                self.signal_to_set_up_orders = True
+                self.signal_set_up_orders = True
             # If the count of active orders is not as expected, set up new orders
             elif len(active_orders) != 2:              
-                self.signal_to_set_up_orders = True
+                self.signal_set_up_orders = True
                 current_symbol = next(order for order in self.order_list if order.status == "NEW").symbol
                 self.logger.debug("Active orders count is not equal to 2.")
                 self.__close_open_positions_and_orders_for_symbol(current_symbol)
@@ -166,10 +250,15 @@ class SzalaiStrategy:
         # Calculate the change in account balance
         account_balance_change = current_account_balance / self.start_account_balance
         self.logger.info(f"Account balance change is {account_balance_change}.")
+        # Calculate the max positive and max negative balance changes
+        max_positive_balance_change = 1 + szalai_strategy_config.MAX_POSITIVE_ACCOUNT_BALANCE_CHANGE
+        max_negative_balance_change = 1 - szalai_strategy_config.MAX_NEGATIVE_ACCOUNT_BALANCE_CHANGE      
         # Check if the change exceeds the maximum allowed
-        if abs(account_balance_change - 1) > szalai_strategy_config.MAX_ACCOUNT_BALANCE_CHANGE:
-            self.logger.info(f"Max account balance change of {szalai_strategy_config.MAX_ACCOUNT_BALANCE_CHANGE} has been reached.")
-            # Stop the strategy if the change exceeds the limit
+        if account_balance_change > max_positive_balance_change:
+            self.logger.info(f"Max positive account balance change of {szalai_strategy_config.MAX_POSITIVE_ACCOUNT_BALANCE_CHANGE} has been reached.")
+            self.stop_strategy()
+        if max_negative_balance_change > account_balance_change:
+            self.logger.info(f"Max negative account balance change of {szalai_strategy_config.MAX_NEGATIVE_ACCOUNT_BALANCE_CHANGE} has been reached.")
             self.stop_strategy()
 
     def __check_side(self) -> None:
@@ -206,7 +295,7 @@ class SzalaiStrategy:
         trading_symbol = self.__get_most_volatile_symbol()
 
         # Check if the volatility change exceeds the minimum threshold
-        if trading_symbol.change > szalai_strategy_config.MIN_CHANGE:
+        if trading_symbol.change >= szalai_strategy_config.MIN_CHANGE:
             self.logger.info(f"Most volatile symbol {trading_symbol.symbol} has a change of {round(trading_symbol.change, 2)}.")
 
             # Calculate the order quantity
@@ -245,26 +334,12 @@ class SzalaiStrategy:
                     future_stop_loss.cancel()
                 if future_take_profit: 
                     future_take_profit.cancel()
-                # Wait for the next update
-                self.__wait_for_next_kline_update()
 
         else:
             self.logger.warning(
                 f"The most volatile symbol {trading_symbol.symbol} has a change of {round(trading_symbol.change, 2)}, "
                 f"which does not reach the configured minimum change of {szalai_strategy_config.MIN_CHANGE}."
             )
-            # If the amount change does not reach the configured threshold, wait for the next update
-            self.__wait_for_next_kline_update()
-    
-    def __wait_for_next_kline_update(self) -> None:
-        """
-        Wait for the next closed kline data update.
-
-        This method set the set up orders signal to True and invalidates all kline data.
-        """
-        self.signal_to_set_up_orders = True
-        for kline_data in self.kline_data_list:
-            kline_data.is_closed = False
 
     def __calculate_quantity(self, kline_data: KlineData) -> float:
         """
@@ -272,7 +347,8 @@ class SzalaiStrategy:
 
         This method calculates the necessary trading quantity from the configured USD amount to risk.
         """
-        quantity = round(szalai_strategy_config.RISK_USD / kline_data.close_price, 3)
+        quantity_precision = next(symbol.quantity_precision for symbol in self.symbol_list if symbol.symbol == kline_data.symbol)
+        quantity = round(szalai_strategy_config.RISK_USD / kline_data.close_price, quantity_precision)
         self.logger.info(
             f"The calculated quantity of symbol {kline_data.symbol} " 
             f"from {szalai_strategy_config.RISK_USD} USD is {quantity}."
@@ -330,9 +406,14 @@ class SzalaiStrategy:
         Updates the kline (candlestick) data based on the incoming WebSocket message.
 
         This method processes the kline data message, updates the relevant KlineData object,
-        and logs the update. It checks if the kline data is closed and logs the data accordingly.
+        and logs the update.
         """
-        self.logger.debug(f"Kline data update, message: {message}.")
+
+        kline_event_time = (datetime.fromtimestamp(message["data"]["E"]/1000))
+        kline_start_time = (datetime.fromtimestamp(message["data"]["k"]["t"]/1000))
+        kline_close_time = (datetime.fromtimestamp(message["data"]["k"]["T"]/1000))
+        
+        self.logger.debug(f"Kline data update, kline_event_time: {kline_event_time}, kline_start_time: {kline_start_time}, kline_close_time: {kline_close_time}, message: {message}.")
         kline_data = next((x for x in self.kline_data_list if x.symbol == message["data"]["s"]), None)
         if kline_data is not None:
             kline_data.interval = message["data"]["k"]["i"]
@@ -341,18 +422,8 @@ class SzalaiStrategy:
             kline_data.high_price = float(message["data"]["k"]["h"])
             kline_data.low_price = float(message["data"]["k"]["l"])
             kline_data.is_closed = bool(message["data"]["k"]["x"])
-
-            if kline_data.is_closed:
-                pass
-                self.logger.info(f"Kline data has been updated, {kline_data}.")
-            else:
-                pass
-                self.logger.debug(f"Kline data has been updated, {kline_data}.")
             
-            if all(x.is_closed for x in self.kline_data_list):
-                self.signal_to_check_orders = True
-                self.logger.debug("Signal to check orders has been set to True.")
-
+            self.signal_check_orders = True
 
     def __update_order_data_handler(self, message: str) -> None:
         """
@@ -373,10 +444,10 @@ class SzalaiStrategy:
 
             if (order.type in ["STOP_MARKET", "TAKE_PROFIT_MARKET"]) and order.status == "FILLED":
                 self.logger.info(f"{order.type} order has been filled, {order}.")
-                self.signal_to_check_profit = True
+                self.signal_check_profit = True
                 self.logger.debug("Signal to check profit has been set to True.")
 
-            self.signal_to_check_orders = True
+            self.signal_check_orders = True
             self.logger.debug("Signal to check orders has been set to True.")
 
     def __create_position_order(self, symbol: str, quantity: float, side: Side) -> OrderResponse:
@@ -398,7 +469,8 @@ class SzalaiStrategy:
         This method calculates the take profit price based on the current price and trading side,
         then creates the appropriate order.
         """
-        tp_price = self.__calculate_take_profit_price(position_price, side)
+        price_precision = next(symbol_info.price_precision for symbol_info in self.symbol_list if symbol_info.symbol == symbol)
+        tp_price = round(self.__calculate_take_profit_price(position_price, side), price_precision)
         self.logger.info(f"Creating take profit order, symbol: {symbol}, price: {tp_price}, side: {side.name}.")
         if self.side == Side.LONG:
             return self.client_manager.futures_create_sell_take_profit_market_order(symbol, tp_price)
@@ -412,7 +484,8 @@ class SzalaiStrategy:
         This method calculates the stop loss price based on the current price and trading side,
         then creates the appropriate order.
         """
-        sl_price = self.__calculate_stop_loss_price(position_price, side)
+        price_precision = next(symbol_info.price_precision for symbol_info in self.symbol_list if symbol_info.symbol == symbol)
+        sl_price = round(self.__calculate_stop_loss_price(position_price, side), price_precision)
         self.logger.info(f"Creating stop loss order, symbol: {symbol}, position price: {sl_price}, side: {side.name}.")
         if self.side == Side.LONG:
             return self.client_manager.futures_create_sell_stop_market_order(symbol, sl_price)

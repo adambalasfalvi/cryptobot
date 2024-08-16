@@ -1,8 +1,10 @@
+from datetime import datetime
 from logging import Logger
 from binance import Client
 from binance import enums
 from configs import binance_config
 from models.order_response import OrderResponse
+from models.symbol import Symbol
 
 class BinanceClientManager():
     """This class manages Binance client operations including creating orders, 
@@ -16,6 +18,45 @@ class BinanceClientManager():
         """
         self.logger = logger
         self.client = Client(binance_config.API_KEY, binance_config.API_SECRET, testnet=binance_config.TESTNET)
+
+    def futures_get_symbol_precision_info(self, symbol: str) -> None:
+        """Gets symbol precision information.
+
+        Args:
+            symbol (str): Trading symbol.
+        """
+        response = self.client.futures_exchange_info()
+
+        try:
+            symbol_information = next(symbol_info for symbol_info in response["symbols"] if symbol_info["symbol"] == symbol)
+            self.logger.debug(
+                f"Symbol information, symbol: {symbol}, "
+                f"pricePrecision: {symbol_information["pricePrecision"]}, "
+                f"quantityPrecision: {symbol_information["quantityPrecision"]} "
+                f"baseAssetPrecision: {symbol_information["baseAssetPrecision"]}, "
+                f"quotePrecision: {symbol_information["quotePrecision"]}."
+            )
+            return {
+                "symbol": symbol,
+                "pricePrecision": symbol_information["pricePrecision"],
+                "quantityPrecision": symbol_information["quantityPrecision"],
+                "baseAssetPrecision": symbol_information["baseAssetPrecision"],
+                "quotePrecision": symbol_information["quotePrecision"]
+            }
+        except StopIteration as e:
+            self.logger.error(f"Error while getting symbol precision information, {str(e)}")
+            self.logger.debug("Error while getting symbol precision information:", exc_info=True)
+    
+    def futures_get_server_time(self) -> datetime:
+        """Gets the current time from the Binance server.
+
+        Returns:
+            datetime: The current Binance server time.
+        """
+        response = self.client.futures_time()
+        server_time = datetime.fromtimestamp(response["serverTime"]/1000)
+        self.logger.debug(f"Server time is {server_time}.")
+        return server_time
     
     def futures_create_buy_market_order(self, symbol: str, quantity: float) -> OrderResponse:
         """Creates a futures buy market order.
@@ -92,7 +133,7 @@ class BinanceClientManager():
             symbol=symbol, 
             side=enums.SIDE_BUY, 
             type=enums.FUTURE_ORDER_TYPE_STOP_MARKET, 
-            stopPrice=round(stop_price, 2),
+            stopPrice=stop_price,
             timeInForce=enums.TIME_IN_FORCE_GTC,
             closePosition="true")
         
@@ -122,7 +163,7 @@ class BinanceClientManager():
             symbol=symbol, 
             side=enums.SIDE_SELL, 
             type=enums.FUTURE_ORDER_TYPE_STOP_MARKET, 
-            stopPrice=round(stop_price, 2),
+            stopPrice=stop_price,
             timeInForce=enums.TIME_IN_FORCE_GTC,
             closePosition="true")
         
@@ -152,7 +193,7 @@ class BinanceClientManager():
             symbol=symbol, 
             side=enums.SIDE_BUY, 
             type=enums.FUTURE_ORDER_TYPE_TAKE_PROFIT_MARKET, 
-            stopPrice=round(stop_price, 2),
+            stopPrice=stop_price,
             timeInForce=enums.TIME_IN_FORCE_GTC,
             closePosition="true")
         
@@ -182,7 +223,7 @@ class BinanceClientManager():
             symbol=symbol, 
             side=enums.SIDE_SELL, 
             type=enums.FUTURE_ORDER_TYPE_TAKE_PROFIT_MARKET, 
-            stopPrice=round(stop_price, 2),
+            stopPrice=stop_price,
             timeInForce=enums.TIME_IN_FORCE_GTC,
             closePosition="true")
         

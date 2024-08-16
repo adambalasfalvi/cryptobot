@@ -11,7 +11,7 @@ def main():
 
     # Run the strategy
     try:   
-        szalai_strategy.run_strategy()
+        szalai_strategy.start_strategy()
     except KeyboardInterrupt:
         # Stop the strategy
         szalai_strategy.stop_strategy()

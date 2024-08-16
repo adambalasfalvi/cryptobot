@@ -65,6 +65,16 @@ class KlineData:
             bool: True if all attributes are not None and the k-line is closed, False otherwise.
         """
         return all(value is not None for value in self.__dict__.values()) and self.is_closed
+    
+    @property 
+    def is_not_empty(self) -> bool:
+        """
+        Checks if all attributes of the k-line data are not empty.
+
+        Returns:
+            bool: True if all attributes are not None, False otherwise.
+        """
+        return all(value is not None for value in self.__dict__.values())
 
     def __str__(self) -> str:
         """

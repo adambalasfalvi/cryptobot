@@ -22,7 +22,6 @@ TRADE_SYMBOLS = [
     "PHBUSDT","LTCUSDT","GLMUSDT","QTUMUSDT","BNXUSDT","ARKUSDT",
     "NEOUSDT","ALICEUSDT","VETUSDT","LQTYUSDT"
 ]
-# TRADE_SYMBOLS = ["BTCUSDT", "ETHUSDT"]
 
 # Currency of the account being used for trading
 ACCOUNT_CURRENCY = "USDT"
@@ -31,10 +30,13 @@ ACCOUNT_CURRENCY = "USDT"
 BAR_INTERVAL = "1m"
 
 # Minimum percentage change in price to consider for volatility calculations
-MIN_CHANGE = 0.1
+MIN_CHANGE = 0.0
 
-# Maximum allowable change in account balance before stopping the strategy (e.g., 1% = 0.01)
-MAX_ACCOUNT_BALANCE_CHANGE = 0.001
+# Maximum allowable positive change in account balance before stopping the strategy (e.g., 1% = 0.01)
+MAX_POSITIVE_ACCOUNT_BALANCE_CHANGE = 0.001
+
+# Maximum allowable negative change in account balance before stopping the strategy (e.g., 1% = 0.01)
+MAX_NEGATIVE_ACCOUNT_BALANCE_CHANGE = 0.001
 
 # Amount of USD to risk per trade
 RISK_USD = 120 
