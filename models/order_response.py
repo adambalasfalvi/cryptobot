@@ -1,3 +1,5 @@
+from datetime import datetime
+
 class OrderResponse():
     """
     A class to represent the response from an order placed on the Binance platform.
@@ -11,6 +13,7 @@ class OrderResponse():
         original_quantity (float): The original quantity of the order.
         type (str): The type of the order (e.g., market, limit).
         side (str): The side of the order (buy or sell).
+        update_time (datetime): The update time of the order.
     """
 
     def __init__(
@@ -22,7 +25,8 @@ class OrderResponse():
             stop_price: float, 
             original_quantity: float, 
             type: str, 
-            side: str) -> None:
+            side: str,
+            update_time: datetime) -> None:
         """
         Initializes the OrderResponse object with given parameters.
 
@@ -35,6 +39,7 @@ class OrderResponse():
             original_quantity (float): The original quantity of the order.
             type (str): The type of the order (e.g., market, limit).
             side (str): The side of the order (buy or sell).
+            update_time (datetime): The update time of the order.
         """
         self.client_order_id = client_order_id
         self.symbol = symbol
@@ -44,6 +49,7 @@ class OrderResponse():
         self.original_quantity = original_quantity
         self.type = type
         self.side = side
+        self.update_time = update_time
 
     @property
     def is_updated(self) -> bool:
@@ -69,5 +75,6 @@ class OrderResponse():
             f"stop_price: {self.stop_price}, "
             f"original_quantity: {self.original_quantity}, "
             f"type: {self.type}, "
-            f"side: {self.side}"
+            f"side: {self.side}, "
+            f"update_time: {self.update_time}"
         )

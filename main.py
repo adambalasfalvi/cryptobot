@@ -1,6 +1,3 @@
-import logging
-import signal
-import sys
 from logic.strategies.szalai_strategy import SzalaiStrategy
 
 def main():

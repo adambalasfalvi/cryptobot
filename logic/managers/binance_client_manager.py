@@ -4,7 +4,6 @@ from binance import Client
 from binance import enums
 from configs import binance_config
 from models.order_response import OrderResponse
-from models.symbol import Symbol
 
 class BinanceClientManager():
     """This class manages Binance client operations including creating orders, 
@@ -85,7 +84,9 @@ class BinanceClientManager():
             float(response["stopPrice"]),
             float(response["origQty"]),
             response["type"],
-            response["side"])
+            response["side"],
+            datetime.fromtimestamp(response["updateTime"]/1000)
+        )
         return order_response
         
     def futures_create_sell_market_order(self, symbol: str, quantity: float) -> OrderResponse:
@@ -115,7 +116,9 @@ class BinanceClientManager():
             float(response["stopPrice"]),
             float(response["origQty"]),
             response["type"],
-            response["side"])
+            response["side"],
+            datetime.fromtimestamp(response["updateTime"]/1000)
+        )
         return order_response
 
     def futures_create_buy_stop_market_order(self, symbol: str, stop_price: float) -> OrderResponse:
@@ -145,7 +148,9 @@ class BinanceClientManager():
             float(response["stopPrice"]),
             float(response["origQty"]),
             response["type"],
-            response["side"])
+            response["side"],
+            datetime.fromtimestamp(response["updateTime"]/1000)
+        )
         return order_response
         
     def futures_create_sell_stop_market_order(self, symbol: str, stop_price: float) -> OrderResponse:
@@ -175,7 +180,9 @@ class BinanceClientManager():
             float(response["stopPrice"]),
             float(response["origQty"]),
             response["type"],
-            response["side"])
+            response["side"],
+            datetime.fromtimestamp(response["updateTime"]/1000)
+        )
         return order_response
         
     def futures_create_buy_take_profit_market_order(self, symbol: str, stop_price: float) -> OrderResponse:
@@ -205,7 +212,9 @@ class BinanceClientManager():
             float(response["stopPrice"]),
             float(response["origQty"]),
             response["type"],
-            response["side"])
+            response["side"],
+            datetime.fromtimestamp(response["updateTime"]/1000)
+        )
         return order_response
         
     def futures_create_sell_take_profit_market_order(self, symbol: str, stop_price: float) -> OrderResponse:
@@ -235,7 +244,9 @@ class BinanceClientManager():
             float(response["stopPrice"]),
             float(response["origQty"]),
             response["type"],
-            response["side"])
+            response["side"],
+            datetime.fromtimestamp(response["updateTime"]/1000)
+        )
         return order_response
     
     def futures_cancel_all_open_orders(self, symbol: str) -> str:

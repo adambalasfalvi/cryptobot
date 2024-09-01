@@ -59,7 +59,7 @@ class SzalaiStrategy:
 
         This method initializes and runs the trading strategy by:
         - Logging the start of the strategy.
-        - Getting precision informations for symbols
+        - Getting precision informations for symbols.
         - Closing any open positions and orders.
         - Fetching the initial account balance.
         - Configuring leverage for each trading symbol.
@@ -73,22 +73,7 @@ class SzalaiStrategy:
         self.logger.info("Starting Szalai strategy.")
 
         # Get precision informations for symbols
-        with ThreadPoolExecutor() as executor:
-            futures: list[Future] = []
-            for symbol in szalai_strategy_config.TRADE_SYMBOLS:
-                futures.append(executor.submit(self.client_manager.futures_get_symbol_precision_info, symbol))
-
-            for future in futures:
-                symbol_precision_info = future.result()    
-                self.symbol_list.append(
-                    Symbol(
-                        symbol_precision_info["symbol"],
-                        symbol_precision_info["pricePrecision"],
-                        symbol_precision_info["quantityPrecision"],
-                        symbol_precision_info["baseAssetPrecision"],
-                        symbol_precision_info["quotePrecision"]
-                    )
-                )
+        self.__get_precision_information_for_symbols()
 
         # Close any existing open positions and orders for all symbols to ensure a clean state
         self.__close_open_positions_and_orders_for_all_symbols()
@@ -157,6 +142,20 @@ class SzalaiStrategy:
         self.websocket_manager.stop_websocket()
         # Close all open positions and orders for all symbols
         self.__close_open_positions_and_orders_for_all_symbols()
+    
+    def __get_precision_information_for_symbols(self) -> None:
+        """Get precision information for all symbols concurrently."""
+        with ThreadPoolExecutor(max_workers=len(szalai_strategy_config.TRADE_SYMBOLS)) as executor:
+            for symbol_precision_info in executor.map(self.client_manager.futures_get_symbol_precision_info, szalai_strategy_config.TRADE_SYMBOLS):   
+                self.symbol_list.append(
+                    Symbol(
+                        symbol_precision_info["symbol"],
+                        symbol_precision_info["pricePrecision"],
+                        symbol_precision_info["quantityPrecision"],
+                        symbol_precision_info["baseAssetPrecision"],
+                        symbol_precision_info["quotePrecision"]
+                    )
+                )
 
     def __calculate_trigger_time(self, server_time: datetime) -> None:
         """Calculate the next trigger time based on the interval."""
@@ -205,7 +204,17 @@ class SzalaiStrategy:
             trigger_time = self.__calculate_trigger_time(server_time)
             time_to_sleep = (trigger_time - server_time).total_seconds()
             self.logger.debug(f"Time to sleep: {time_to_sleep} seconds.")
-            time.sleep(time_to_sleep)
+
+            sleep_interval = 0.1 # seconds
+            elapsed_time = 0
+
+            while not self.stop_event.is_set() and elapsed_time < time_to_sleep:
+                time.sleep(sleep_interval)
+                elapsed_time += sleep_interval
+
+            if self.stop_event.is_set():
+                break
+    
             self.signal_interval_trigger = True
             self.logger.info(f"The configured {self.interval.value} interval has been triggered.")
 
@@ -269,15 +278,14 @@ class SzalaiStrategy:
         most recently filled order. It ensures that the trading side aligns with the latest filled orders.
         """
         self.logger.debug(f"Checking side, current side: {self.side.name}.")
+        # Sort the order list by update time
+        sorted_order_list = sorted(self.order_list, key=lambda x: x.update_time, reverse=True)
         # Find the last filled order
-        last_filled_order = next(order for order in self.order_list if (order.type in ["STOP_MARKET", "TAKE_PROFIT_MARKET"]) and order.status == "FILLED")
+        last_filled_order = next(order for order in sorted_order_list if (order.type in ["STOP_MARKET", "TAKE_PROFIT_MARKET"]) and order.status == "FILLED")
         self.logger.debug(f"Last filled order: {last_filled_order}.")
-        # Update the trading side based on the type of the last filled order
-        if last_filled_order.type == "STOP_MARKET" and self.side == Side.LONG:
-            self.side = Side.SHORT
-            self.logger.info(f"Side has been changed to {self.side.name}.")
-        elif last_filled_order.type == "TAKE_PROFIT_MARKET" and self.side == Side.SHORT:
-            self.side = Side.LONG
+        # Toggle the trading side if the last filled order is STOP_MARKET
+        if last_filled_order.type == "STOP_MARKET":
+            self.side = Side.LONG if self.side == Side.SHORT else Side.SHORT
             self.logger.info(f"Side has been changed to {self.side.name}.")
 
     def __set_up_orders(self) -> None:
@@ -304,7 +312,7 @@ class SzalaiStrategy:
             self.logger.info(f"Setting up orders, quantity: {quantity}, side: {self.side.name}.")
 
             try:            
-                with ThreadPoolExecutor(max_workers=3) as executor:
+                with ThreadPoolExecutor() as executor:
                     
                     # Initialize futures to None
                     future_position = None
@@ -334,6 +342,8 @@ class SzalaiStrategy:
                     future_stop_loss.cancel()
                 if future_take_profit: 
                     future_take_profit.cancel()
+                # Cancel all orders and positions
+                self.__close_open_positions_and_orders_for_symbol(trading_symbol.symbol)
 
         else:
             self.logger.warning(
@@ -354,6 +364,33 @@ class SzalaiStrategy:
             f"from {szalai_strategy_config.RISK_USD} USD is {quantity}."
         )
         return quantity
+    
+    def __close_open_positions_and_orders_for_symbol(self, symbol: str) -> None:
+        """
+        Closes all open positions and orders for a specified symbol.
+
+        This method cancels all open orders and closes any positions by creating a market
+        order for the remaining position amount.
+        """
+        self.logger.info(f"Closing all open positions and orders for {symbol}.")
+        with ThreadPoolExecutor() as executor:
+            # Cancel all open orders for the symbol
+            executor.submit(self.client_manager.futures_cancel_all_open_orders, symbol)
+
+            # Get position information and close any open positions
+            position_info_future = executor.submit(self.client_manager.futures_get_position_information, symbol)
+            position_info_result = position_info_future.result()
+            position_amount = float(next((x["positionAmt"] for x in position_info_result)))
+
+            # If the position amount is positive, sell it
+            if position_amount > 0:
+                sell_market_order = self.client_manager.futures_create_sell_market_order(symbol, position_amount)
+                self.order_list.append(sell_market_order)
+
+            # If the position amount is negative, buy it
+            if position_amount < 0:
+                buy_market_order = self.client_manager.futures_create_buy_market_order(symbol, abs(position_amount))
+                self.order_list.append(buy_market_order)
 
     def __close_open_positions_and_orders_for_all_symbols(self) -> None:
         """
@@ -361,45 +398,29 @@ class SzalaiStrategy:
 
         This method iterates through each trading symbol and:
         - Cancels all open orders
-        - Closes any remaining positions by creating market sell orders
+        - Closes any remaining positions by creating market orders
         """
         self.logger.info("Closing all open positions and orders for all symbols.")
-        with ThreadPoolExecutor() as executor:
+        with ThreadPoolExecutor(max_workers=len(szalai_strategy_config.TRADE_SYMBOLS) * 2) as executor:
+
+            # Cancel all open orders for all symbols concurrently
             for symbol in szalai_strategy_config.TRADE_SYMBOLS:
-                # Cancel all open orders for the symbol
                 executor.submit(self.client_manager.futures_cancel_all_open_orders, symbol)
+            
+            # Get position information and close any positions for all symbols concurrently
+            for position_info_result in executor.map(self.client_manager.futures_get_position_information, szalai_strategy_config.TRADE_SYMBOLS):
+                position_symbol = next(x["symbol"] for x in position_info_result)
+                position_amount = float(next(x["positionAmt"] for x in position_info_result))
 
-                # Get position information and close any open positions
-                position_info_future = executor.submit(self.client_manager.futures_get_position_information, symbol)
-                position_info_result = position_info_future.result()
-                position_amount = next((x["positionAmt"] for x in position_info_result))
-
-                if float(position_amount) > 0:
-                    # Create a market sell order to close the position
-                    sell_market_order = self.client_manager.futures_create_sell_market_order(symbol, position_amount)
+                # If the position amount is positive, sell it
+                if position_amount > 0:
+                    sell_market_order = self.client_manager.futures_create_sell_market_order(position_symbol, position_amount)
                     self.order_list.append(sell_market_order)
 
-    def __close_open_positions_and_orders_for_symbol(self, symbol: str) -> None:
-        """
-        Closes all open positions and orders for a specified symbol.
-
-        This method cancels all open orders and closes any positions by creating a market sell
-        order for the remaining position amount.
-        """
-        self.logger.info(f"Closing all open positions and orders for {symbol}.")
-        with ThreadPoolExecutor(max_workers=2) as executor:
-            # Cancel all open orders for the symbol
-            executor.submit(self.client_manager.futures_cancel_all_open_orders, symbol)
-
-            # Get position information and close any open positions
-            position_info_future = executor.submit(self.client_manager.futures_get_position_information, symbol)
-            position_info_result = position_info_future.result()
-            position_amount = next((x["positionAmt"] for x in position_info_result))
-
-            if float(position_amount) > 0:
-                # Create a market sell order to close the position
-                sell_market_order = self.client_manager.futures_create_sell_market_order(symbol, position_amount)
-                self.order_list.append(sell_market_order)
+                # If the position amount is negative, buy it
+                if position_amount < 0:
+                    buy_market_order = self.client_manager.futures_create_buy_market_order(position_symbol, abs(position_amount))
+                    self.order_list.append(buy_market_order)
 
     def __update_kline_data_handler(self, message: str) -> None:
         """
