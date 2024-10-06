@@ -1,3 +1,4 @@
+import os
 import sys
 import logging
 import logging.handlers
@@ -118,12 +119,17 @@ class SzalaiStrategy:
                     self.__check_side()  # Adjust the trading side if necessary
 
             # If the signal to check orders is set, verify the status of open orders and handle them
-            if self.signal_check_orders:
+            if not self.signal_check_profit and self.signal_check_orders:
                 self.signal_check_orders = False
                 self.__check_signal_to_order() 
 
             # If the signal to set up new orders and interval trigger is set, set up new orders
-            if self.signal_set_up_orders and self.signal_interval_trigger and all(kline_data.is_not_empty for kline_data in self.kline_data_list):
+            if (
+                not self.signal_check_profit 
+                and self.signal_set_up_orders 
+                and self.signal_interval_trigger 
+                and all(kline_data.is_not_empty for kline_data in self.kline_data_list)
+            ):
                 self.signal_set_up_orders = False
                 self.signal_interval_trigger = False
                 self.__set_up_orders()
@@ -299,8 +305,14 @@ class SzalaiStrategy:
         - Adding these orders to the list and handling any exceptions that may occur
         """
 
-        # Get the most volatile symbol to trade on
-        trading_symbol = self.__get_most_volatile_symbol()
+        with ThreadPoolExecutor() as executor:
+            # Sync OS time
+            executor.submit(os.system, "w32tm /resync >nul 2>&1")
+            self.logger.debug(f"System time has been resynced.")
+
+            # Get the most volatile symbol to trade on
+            future_most_volatile_symbol = executor.submit(self.__get_most_volatile_symbol)
+            trading_symbol = future_most_volatile_symbol.result()
 
         # Check if the volatility change exceeds the minimum threshold
         if trading_symbol.change >= szalai_strategy_config.MIN_CHANGE:
