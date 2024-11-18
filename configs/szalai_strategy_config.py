@@ -19,13 +19,13 @@ MAX_POSITIVE_ACCOUNT_BALANCE_CHANGE = 0.002
 MAX_NEGATIVE_ACCOUNT_BALANCE_CHANGE = 0.001
 
 # Amount of USD to risk per trade
-RISK_USD = 120 
+RISK_USD = 220 
 
 # Leverage to be used in futures trading
 LEVERAGE = 1
 
 # Starting position for the strategy, can be either "LONG" or "SHORT"
-START_POSITION = "SHORT"  # Options: "LONG" or "SHORT"
+# START_POSITION = "SHORT"  # Options: "LONG" or "SHORT"
 
 # Multiplier for calculating stop loss price, e.g., 0.1% below entry price for long positions
 STOP_LOSS_MULTIPLIER = 0.001

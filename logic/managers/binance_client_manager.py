@@ -4,6 +4,7 @@ from binance import Client
 from binance import enums
 from configs import binance_config
 from models.order_response import OrderResponse
+from models.interval import Interval
 
 class BinanceClientManager():
     """This class manages Binance client operations including creating orders, 
@@ -319,3 +320,25 @@ class BinanceClientManager():
         latest_price = float(response["price"])
         self.logger.debug(f"Latest price for {symbol} is {latest_price}.")
         return latest_price
+    
+    def futures_get_symbol_historical_klines_until_now(self, symbol: str, interval: Interval, time_delta: int, limit: int) -> str:
+        """Retrieves historical kline (candlestick) data for a specific symbol until now.
+
+        Parameters:
+            symbol (str): The trading pair or symbol (e.g., 'BTCUSDT') for which historical data is being requested.
+            interval (Interval): The time interval for each kline (e.g., 1 minute, 1 hour).
+            time_delta (int): The time delta in minutes.
+            limit (int): The maximum number of klines to retrieve in a single request.
+
+        Returns:
+            str: The requested historical kline data.
+        """
+        self.logger.debug(f"Getting kline data history for {symbol} symbol, interval: {interval.__str__()}, time_delta: {time_delta}, limit: {limit}")
+        start_time_str = f"{time_delta} minutes ago UTC"
+        response = self.client.futures_historical_klines(
+            symbol, 
+            interval.__str__(), 
+            start_str=start_time_str,
+            limit=limit
+        )
+        return response

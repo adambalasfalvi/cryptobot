@@ -1,4 +1,5 @@
 from enum import Enum
+from datetime import timedelta
 
 class Interval(Enum):
     """
@@ -40,3 +41,74 @@ class Interval(Enum):
     THREE_DAYS = "3d"
     ONE_WEEK = "1w"
     ONE_MONTH = "1M"
+
+    @property
+    def timedelta(self) -> timedelta:
+        if self == Interval.ONE_MINUTE:
+            return timedelta(minutes=1)
+        elif self == Interval.THREE_MINUTES:
+            return timedelta(minutes=3)
+        elif self == Interval.FIVE_MINUTES:
+            return timedelta(minutes=5)
+        elif self == Interval.FIFTEEN_MINUTES:
+            return timedelta(minutes=15)
+        elif self == Interval.THIRTY_MINUTES:
+            return timedelta(minutes=30)
+        elif self == Interval.ONE_HOUR:
+            return timedelta(hours=1)
+        elif self == Interval.TWO_HOURS:
+            return timedelta(hours=2)
+        elif self == Interval.FOUR_HOURS:
+            return timedelta(hours=4)
+        elif self == Interval.SIX_HOURS:
+            return timedelta(hours=6)
+        elif self == Interval.EIGHT_HOURS:
+            return timedelta(hours=8)
+        elif self == Interval.TWELVE_HOURS:
+            return timedelta(hours=12)
+        elif self == Interval.ONE_DAY:
+            return timedelta(days=1)
+        elif self == Interval.THREE_DAYS:
+            return timedelta(days=3)
+        elif self == Interval.ONE_WEEK:
+            return timedelta(weeks=1)
+        elif self == Interval.ONE_MONTH:
+            return timedelta(days=32)
+    
+    def __str__(self) -> str:
+        """
+        Returns a string representation of the Interval enum member.
+
+        Returns:
+            str: A string representation of the Interval enum member.
+        """
+        if self == Interval.ONE_MINUTE:
+            return "1m"
+        elif self == Interval.THREE_MINUTES:
+            return "3m"
+        elif self == Interval.FIVE_MINUTES:
+            return "5m"
+        elif self == Interval.FIFTEEN_MINUTES:
+            return "15m"
+        elif self == Interval.THIRTY_MINUTES:
+            return "30m"
+        elif self == Interval.ONE_HOUR:
+            return "1h"
+        elif self == Interval.TWO_HOURS:
+            return "2h"
+        elif self == Interval.FOUR_HOURS:
+            return "4h"
+        elif self == Interval.SIX_HOURS:
+            return "6h"
+        elif self == Interval.EIGHT_HOURS:
+            return "8h"
+        elif self == Interval.TWELVE_HOURS:
+            return "12h"
+        elif self == Interval.ONE_DAY:
+            return "1d"
+        elif self == Interval.THREE_DAYS:
+            return "3d"
+        elif self == Interval.ONE_WEEK:
+            return "1w"
+        elif self == Interval.ONE_MONTH:
+            return "1m"
