@@ -9,10 +9,9 @@ class KlineData:
         close_price (float): The closing price of the k-line.
         high_price (float): The highest price of the k-line.
         low_price (float): The lowest price of the k-line.
-        is_closed (bool): Indicates whether the k-line is closed.
     """
     
-    def __init__(self, symbol: str, interval: float, open_price: float, close_price: float, high_price: float, low_price: float, is_closed: bool) -> None:
+    def __init__(self, symbol: str, interval: float, open_price: float, close_price: float, high_price: float, low_price: float) -> None:
         """
         Initializes a new instance of the KlineData class.
 
@@ -23,7 +22,6 @@ class KlineData:
             close_price (float): The closing price of the k-line.
             high_price (float): The highest price of the k-line.
             low_price (float): The lowest price of the k-line.
-            is_closed (bool): Indicates whether the k-line is closed.
         """
         self.symbol = symbol
         self.interval = interval
@@ -31,7 +29,6 @@ class KlineData:
         self.close_price = close_price
         self.high_price = high_price
         self.low_price = low_price
-        self.is_closed = is_closed
 
     @classmethod
     def from_symbol(cls, symbol: str):
@@ -44,7 +41,7 @@ class KlineData:
         Returns:
             KlineData: An instance of KlineData with other attributes set to None.
         """
-        return cls(symbol, None, None, None, None, None, None)
+        return cls(symbol, None, None, None, None, None)
 
     @property
     def change(self) -> float:
@@ -52,9 +49,9 @@ class KlineData:
         Calculates the price change of the k-line.
 
         Returns:
-            float: The difference between the high price and the low price.
+            float: The change of price change.
         """
-        return self.high_price - self.low_price
+        return (self.close_price - self.open_price) / self.open_price
 
     @property
     def is_updated(self) -> bool:
@@ -64,7 +61,7 @@ class KlineData:
         Returns:
             bool: True if all attributes are not None and the k-line is closed, False otherwise.
         """
-        return all(value is not None for value in self.__dict__.values()) and self.is_closed
+        return all(value is not None for value in self.__dict__.values())
     
     @property 
     def is_not_empty(self) -> bool:
@@ -89,6 +86,5 @@ class KlineData:
             f"open_price: {self.open_price}, "
             f"close_price: {self.close_price}, "
             f"high_price: {self.high_price}, "
-            f"low_price: {self.low_price}, "
-            f"is_closed: {self.is_closed}"
+            f"low_price: {self.low_price}"
         )

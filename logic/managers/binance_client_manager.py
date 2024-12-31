@@ -1,3 +1,5 @@
+import aiohttp
+import asyncio
 from datetime import datetime
 from logging import Logger
 from binance import Client
@@ -321,24 +323,57 @@ class BinanceClientManager():
         self.logger.debug(f"Latest price for {symbol} is {latest_price}.")
         return latest_price
     
-    def futures_get_symbol_historical_klines_until_now(self, symbol: str, interval: Interval, time_delta: int, limit: int) -> str:
+    async def futures_get_symbol_historical_klines_until_now(self, symbol: str, interval: str, time_delta: int, limit: int) -> str:
         """Retrieves historical kline (candlestick) data for a specific symbol until now.
 
         Parameters:
             symbol (str): The trading pair or symbol (e.g., 'BTCUSDT') for which historical data is being requested.
-            interval (Interval): The time interval for each kline (e.g., 1 minute, 1 hour).
+            interval (str): The time interval for each kline (e.g., 1m, 1h).
             time_delta (int): The time delta in minutes.
             limit (int): The maximum number of klines to retrieve in a single request.
 
         Returns:
             str: The requested historical kline data.
         """
-        self.logger.debug(f"Getting kline data history for {symbol} symbol, interval: {interval.__str__()}, time_delta: {time_delta}, limit: {limit}")
-        start_time_str = f"{time_delta} minutes ago UTC"
-        response = self.client.futures_historical_klines(
-            symbol, 
-            interval.__str__(), 
-            start_str=start_time_str,
-            limit=limit
+
+        end_time = int(datetime.now().timestamp() * 1000)
+        start_time = end_time - (time_delta * 60 * 1000)
+
+        url = f"{binance_config.BASE_URL}/fapi/v1/klines?symbol={symbol}&interval={interval}&startTime={start_time}&endTime={end_time}&limit={limit}"
+        self.logger.debug(
+            f"Getting kline data history for {symbol} symbol, "
+            f"interval: {interval}, "
+            f"time_delta: {time_delta}, "
+            f"limit: {limit}, "
+            f"url: {url}"
         )
-        return response
+
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    return data
+                else:
+                    raise Exception("Response status is not 200.")
+    
+    async def futures_get_kline_data(self, symbol: str, interval: str, limit: int) -> str:
+        """Retrieves kline (candlestick) data for a specific symbol.
+
+        Parameters:
+            symbol (str): The trading pair or symbol (e.g., 'BTCUSDT') for which data is being requested.
+            interval (str): The time interval for each kline (e.g., 1m, 1h).
+            limit (int): The maximum number of klines to retrieve in a single request.
+
+        Returns:
+            str: The requested kline data.
+        """
+        url = f"{binance_config.BASE_URL}/fapi/v1/klines?symbol={symbol}&interval={interval}&limit={limit}"
+        self.logger.debug(f"Getting kline data for {symbol} symbol, interval: {interval}, limit: {limit}, url: {url}")
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    return data
+                else:
+                    raise Exception("Response status is not 200.")

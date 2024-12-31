@@ -4,6 +4,7 @@ import logging
 import logging.handlers
 import time
 import threading
+import asyncio
 from datetime import datetime
 from datetime import timedelta
 from logging import Logger
@@ -17,6 +18,7 @@ from logic.managers.binance_client_manager import BinanceClientManager
 from logic.managers.binance_websocket_manager import BinanceWebsocketManager
 from configs import szalai_strategy_config
 from threading import Event
+from itertools import repeat
 
 class SzalaiStrategy:
     """
@@ -96,12 +98,13 @@ class SzalaiStrategy:
         # Start the WebSocket manager to receive real-time updates for market data and user data
         self.websocket_manager.start_websocket()
 
+        # REST API van helyette használva!
         # Set up the WebSocket for futures kline (candlestick) data and provide a handler for updates
-        self.websocket_manager.setup_futures_kline_multiplex_websocket(
-            szalai_strategy_config.TRADE_SYMBOLS,      # Symbols to monitor
-            self.interval.value,       # Interval for kline data (e.g., 1 minute)
-            self.__update_kline_data_handler           # Handler method to process kline data updates
-        )
+        # self.websocket_manager.setup_futures_kline_multiplex_websocket(
+        #     szalai_strategy_config.TRADE_SYMBOLS,      # Symbols to monitor
+        #     self.interval.__str__(),       # Interval for kline data (e.g., 1m)
+        #     self.__update_kline_data_handler           # Handler method to process kline data updates
+        # )
 
         # Set up the WebSocket for user data to receive order updates and provide a handler for updates
         self.websocket_manager.setup_user_data_websocket(
@@ -117,6 +120,10 @@ class SzalaiStrategy:
 
                 if not self.stop_event.is_set(): 
                     self.__check_side()  # Adjust the trading side if necessary
+            
+            # If the interval trigger has been triggered, check whether it's time to order
+            if self.signal_interval_trigger:
+                self.__check_signal_to_order()
 
             # If the signal to check orders is set, verify the status of open orders and handle them
             if not self.signal_check_profit and self.signal_check_orders:
@@ -128,11 +135,11 @@ class SzalaiStrategy:
                 not self.signal_check_profit
                 and self.signal_set_up_orders
                 and (self.current_symbol or self.signal_interval_trigger)
-                and all(kline_data.is_not_empty for kline_data in self.kline_data_list)
+                # and all(kline_data.is_not_empty for kline_data in self.kline_data_list)
             ):
                 self.signal_set_up_orders = False
                 self.signal_interval_trigger = False
-                self.__set_up_orders()
+                asyncio.run(self.__set_up_orders())
 
     def stop_strategy(self) -> None:
         """
@@ -149,7 +156,7 @@ class SzalaiStrategy:
         # Close all open positions and orders for all symbols
         self.__close_open_positions_and_orders_for_all_symbols()
     
-    def __calculate_first_side(self, symbol: str) -> None:
+    async def __calculate_first_side(self, symbol: str) -> None:
         """
         Calculates what will be the side to begin with if a new symbol has been chosen.
 
@@ -158,16 +165,19 @@ class SzalaiStrategy:
         """
         time_delta_in_minutes = int(((self.interval.timedelta * 3).total_seconds() / 60)) % 60
         self.logger.debug(f"The calculated time_delta_in_minutes is {time_delta_in_minutes} minutes.")
-        kline_datas = self.client_manager.futures_get_symbol_historical_klines_until_now(symbol, self.interval, time_delta_in_minutes, 2)
+        # TODO: itt már csak egy darab lezárt gyertyát kell lekérni
+        kline_datas = await self.client_manager.futures_get_symbol_historical_klines_until_now(symbol, self.interval.__str__(), time_delta_in_minutes, 2)
 
         if kline_datas and len(kline_datas) >= 2:
-            # increase
-            if float(kline_datas[-1][4]) - float(kline_datas[-2][4]) > 0:
+            # get the latest closed kline data and subtract close price from open price
+            # if price has increased
+            if float(kline_datas[-1][1]) - float(kline_datas[-1][4]) < 0:
                 self.side = Side.SHORT
-            # decline
+            # if declined
             else:
                 self.side = Side.LONG
         else:
+            # default side
             self.side = Side.LONG
     
     def __get_precision_information_for_symbols(self) -> None:
@@ -325,20 +335,59 @@ class SzalaiStrategy:
             self.side = Side.LONG if self.side == Side.SHORT else Side.SHORT
             self.logger.info(f"Side has been changed to {self.side.name}.")
 
-    def __set_up_orders(self) -> None:
+    # async verzió van helyette használva!
+    # def __update_kline_data_for_all_symbol(self) -> None:
+    #     """
+    #     Gets the current kline data for all symbols listed in szalai_strategy_config concurrently.
+    #     """
+    #     with ThreadPoolExecutor(max_workers=len(szalai_strategy_config.TRADE_SYMBOLS)) as executor:
+    #         for kline_data in self.kline_data_list:
+    #             future = executor.submit(self.client_manager.futures_get_kline_data, kline_data.symbol, self.interval.__str__(), 1)
+    #             current_kline_data = future.result()
+    #             if current_kline_data:
+    #                 kline_data.interval = self.interval.__str__()
+    #                 kline_data.open_price = float(current_kline_data[0][1])
+    #                 kline_data.high_price = float(current_kline_data[0][2])
+    #                 kline_data.low_price = float(current_kline_data[0][3])
+    #                 kline_data.close_price = float(current_kline_data[0][4])
+
+    async def __update_kline_data_for_all_symbol(self) -> None:
+        """
+        Gets the current kline data for all symbols listed in szalai_strategy_config concurrently.
+        """
+        # Create a list of coroutines to update each kline data
+        for kline_data in self.kline_data_list:
+            current_kline_data = await self.client_manager.futures_get_kline_data(
+                kline_data.symbol, self.interval.__str__(), 1
+            )
+            if current_kline_data:
+                kline_data.interval = self.interval.__str__()
+                kline_data.open_price = float(current_kline_data[0][1])
+                kline_data.high_price = float(current_kline_data[0][2])
+                kline_data.low_price = float(current_kline_data[0][3])
+                kline_data.close_price = float(current_kline_data[0][4])
+
+    async def __set_up_orders(self) -> None:
         """
         Sets up the order creating. If the signal_change_pair flag is true, it will search for the most volatile symbol. 
         """
         # New symbol      
         if not self.current_symbol:
-            with ThreadPoolExecutor() as executor:
-                # Sync OS time
-                executor.submit(os.system, "w32tm /resync >nul 2>&1")
-                self.logger.debug(f"System time has been resynced.")
+            # Get up-to-date kline data for all symbols
+            await self.__update_kline_data_for_all_symbol()
 
-                # Get the most volatile symbol to trade on
-                future_most_volatile_symbol = executor.submit(self.__get_most_volatile_symbol)
-                trading_symbol = future_most_volatile_symbol.result()
+            trading_symbol = await self.__get_most_volatile_symbol()
+
+            # TODO: kitakarítani
+            # with ThreadPoolExecutor() as executor:
+            #     # TODO: el kell ezen gondolkozni, hogy kell-e
+            #     # Sync OS time
+            #     # executor.submit(os.system, "w32tm /resync >nul 2>&1")
+            #     # self.logger.debug(f"System time has been resynced.")
+
+            #     # Get the most volatile symbol to trade on
+            #     future_most_volatile_symbol = executor.submit(self.__get_most_volatile_symbol)
+            #     trading_symbol = future_most_volatile_symbol.result()
 
             # Check if the volatility change exceeds the minimum threshold
             if trading_symbol.change >= szalai_strategy_config.MIN_CHANGE:
@@ -348,7 +397,7 @@ class SzalaiStrategy:
                 self.logger.info(f"The current trading symbol is {self.current_symbol}.")
 
                 # Calculate the first trading side
-                self.__calculate_first_side(trading_symbol.symbol)
+                await self.__calculate_first_side(trading_symbol.symbol)
                 self.logger.info(f"The calculated first trading side is {self.side}.")
 
                 self.__create_orders(trading_symbol)
@@ -380,6 +429,7 @@ class SzalaiStrategy:
         quantity = self.__calculate_quantity(trading_symbol)
         self.logger.info(f"Setting up orders, quantity: {quantity}, side: {self.side.name}.")
 
+        # TODO: asyncio-ra átírni
         try:            
             with ThreadPoolExecutor() as executor:              
                 # Initialize futures to None
@@ -485,29 +535,29 @@ class SzalaiStrategy:
                     buy_market_order = self.client_manager.futures_create_buy_market_order(position_symbol, abs(position_amount))
                     self.order_list.append(buy_market_order)
 
-    def __update_kline_data_handler(self, message: str) -> None:
-        """
-        Updates the kline (candlestick) data based on the incoming WebSocket message.
+    # REST API van helyette használva!
+    # def __update_kline_data_handler(self, message: str) -> None:
+    #     """
+    #     Updates the kline (candlestick) data based on the incoming WebSocket message.
 
-        This method processes the kline data message, updates the relevant KlineData object,
-        and logs the update.
-        """
+    #     This method processes the kline data message, updates the relevant KlineData object,
+    #     and logs the update.
+    #     """
 
-        kline_event_time = (datetime.fromtimestamp(message["data"]["E"]/1000))
-        kline_start_time = (datetime.fromtimestamp(message["data"]["k"]["t"]/1000))
-        kline_close_time = (datetime.fromtimestamp(message["data"]["k"]["T"]/1000))
+    #     kline_event_time = (datetime.fromtimestamp(message["data"]["E"]/1000))
+    #     kline_start_time = (datetime.fromtimestamp(message["data"]["k"]["t"]/1000))
+    #     kline_close_time = (datetime.fromtimestamp(message["data"]["k"]["T"]/1000))
         
-        self.logger.debug(f"Kline data update, kline_event_time: {kline_event_time}, kline_start_time: {kline_start_time}, kline_close_time: {kline_close_time}, message: {message}.")
-        kline_data = next((x for x in self.kline_data_list if x.symbol == message["data"]["s"]), None)
-        if kline_data is not None:
-            kline_data.interval = message["data"]["k"]["i"]
-            kline_data.open_price = float(message["data"]["k"]["o"])
-            kline_data.close_price = float(message["data"]["k"]["c"])
-            kline_data.high_price = float(message["data"]["k"]["h"])
-            kline_data.low_price = float(message["data"]["k"]["l"])
-            kline_data.is_closed = bool(message["data"]["k"]["x"])
+    #     self.logger.debug(f"Kline data update, kline_event_time: {kline_event_time}, kline_start_time: {kline_start_time}, kline_close_time: {kline_close_time}, message: {message}.")
+    #     kline_data = next((x for x in self.kline_data_list if x.symbol == message["data"]["s"]), None)
+    #     if kline_data is not None:
+    #         kline_data.interval = message["data"]["k"]["i"]
+    #         kline_data.open_price = float(message["data"]["k"]["o"])
+    #         kline_data.close_price = float(message["data"]["k"]["c"])
+    #         kline_data.high_price = float(message["data"]["k"]["h"])
+    #         kline_data.low_price = float(message["data"]["k"]["l"])
             
-            self.signal_check_orders = True
+    #         self.signal_check_orders = True
 
     def __update_order_data_handler(self, message: str) -> None:
         """
@@ -576,7 +626,7 @@ class SzalaiStrategy:
         else:
             return self.client_manager.futures_create_buy_stop_market_order(symbol, sl_price)
 
-    def __get_most_volatile_symbol(self) -> KlineData:
+    async def __get_most_volatile_symbol(self) -> KlineData:
         """
         Retrieves the most volatile symbol from the kline data list.
 
