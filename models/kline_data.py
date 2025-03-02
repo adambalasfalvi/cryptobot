@@ -51,7 +51,7 @@ class KlineData:
         Returns:
             float: The change of price change.
         """
-        return (self.close_price - self.open_price) / self.open_price
+        return abs((self.close_price - self.open_price) / self.open_price)
 
     @property
     def is_updated(self) -> bool:

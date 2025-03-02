@@ -32,7 +32,7 @@ LEVERAGE = 1
 # START_POSITION = "SHORT"  # Options: "LONG" or "SHORT"
 
 # Multiplier for calculating stop loss price, e.g., 0.1% below entry price for long positions
-STOP_LOSS_MULTIPLIER = 0.001
+STOP_LOSS_MULTIPLIER = 0.0001
 
 # Multiplier for calculating take profit price, e.g., 0.1% above entry price for long positions
-TAKE_PROFIT_MULTIPLIER = 0.001
+TAKE_PROFIT_MULTIPLIER = 0.0001
