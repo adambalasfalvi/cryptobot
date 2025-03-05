@@ -323,27 +323,26 @@ class BinanceClientManager():
         self.logger.debug(f"Latest price for {symbol} is {latest_price}.")
         return latest_price
     
-    async def async_futures_get_symbol_historical_klines_until_now(self, symbol: str, interval: str, time_delta: int, limit: int, session: aiohttp.ClientSession) -> str:
-        """Retrieves historical kline (candlestick) data for a specific symbol until now.
+    async def async_futures_get_kline_data_time_range(self, symbol: str, interval: str, start_time: int, end_time: int, limit: int, session: aiohttp.ClientSession) -> str:
+        """Retrieves historical kline (candlestick) data for a specific symbol within a given time range.
 
         Parameters:
             symbol (str): The trading pair or symbol (e.g., 'BTCUSDT') for which historical data is being requested.
             interval (str): The time interval for each kline (e.g., 1m, 1h).
-            time_delta (int): The time delta in minutes.
+            start_time (int): The start time in milliseconds for the data retrieval.
+            end_time (int): The end time in milliseconds for the data retrieval.
             limit (int): The maximum number of klines to retrieve in a single request.
+            session (aiohttp.ClientSession): The aiohttp session to use for the request.
 
         Returns:
             str: The requested historical kline data.
         """
-
-        end_time = int(datetime.now().timestamp() * 1000)
-        start_time = end_time - (time_delta * 60 * 1000)
-
         url = f"{binance_config.BASE_URL}/fapi/v1/klines?symbol={symbol}&interval={interval}&startTime={start_time}&endTime={end_time}&limit={limit}"
         self.logger.debug(
             f"Getting kline data history for {symbol} symbol, "
             f"interval: {interval}, "
-            f"time_delta: {time_delta}, "
+            f"start_time: {start_time}, "
+            f"end_time: {end_time}, "
             f"limit: {limit}, "
             f"url: {url}."
         )
@@ -353,7 +352,7 @@ class BinanceClientManager():
                 data = await response.json()
                 return data
             else:
-                raise Exception(f"Response status is {response.status}.")
+                raise Exception(f"Response status is {response.status}, response: {await response.text()}.")
     
     async def async_futures_get_kline_data(self, symbol: str, interval: str, limit: int, session: aiohttp.ClientSession) -> str:
         """Retrieves kline (candlestick) data for a specific symbol.
@@ -374,7 +373,7 @@ class BinanceClientManager():
                 data = await response.json()
                 return data
             else:
-                raise Exception(f"Response status is {response.status}.")
+                raise Exception(f"Response status is {response.status}, response: {await response.text()}.")
                 
     async def async_futures_create_buy_market_order(self, symbol: str, quantity: float, session: aiohttp.ClientSession) -> OrderResponse:
         """Creates a futures buy market order.
@@ -425,7 +424,7 @@ class BinanceClientManager():
                 )
                 return order_response
             else:
-                raise Exception(f"Response status is {response.status}.")
+                raise Exception(f"Response status is {response.status}, response: {await response.text()}.")
     
     async def async_futures_create_sell_market_order(self, symbol: str, quantity: float, session: aiohttp.ClientSession) -> OrderResponse:
         """Creates a futures sell market order.
@@ -476,7 +475,7 @@ class BinanceClientManager():
                 )
                 return order_response
             else:
-                raise Exception(f"Response status is {response.status}.")
+                raise Exception(f"Response status is {response.status}, response: {await response.text()}.")
                 
     async def async_futures_create_buy_take_profit_market_order(self, symbol: str, stop_price: float, session: aiohttp.ClientSession) -> OrderResponse:
         """Creates a futures buy take profit market order.
@@ -527,7 +526,7 @@ class BinanceClientManager():
                 )
                 return order_response
             else:
-                raise Exception(f"Response status is {response.status}.")
+                raise Exception(f"Response status is {response.status}, response: {await response.text()}.")
                 
     async def async_futures_create_sell_take_profit_market_order(self, symbol: str, stop_price: float, session: aiohttp.ClientSession) -> OrderResponse:
         """Creates a futures sell take profit market order.
@@ -578,7 +577,7 @@ class BinanceClientManager():
                 )
                 return order_response
             else:
-                raise Exception(f"Response status is {response.status}.")
+                raise Exception(f"Response status is {response.status}, response: {await response.text()}.")
     
     async def async_futures_create_buy_stop_market_order(self, symbol: str, stop_price: float, session: aiohttp.ClientSession) -> OrderResponse:
         """Creates a futures buy stop market order.
@@ -629,7 +628,7 @@ class BinanceClientManager():
                 )
                 return order_response
             else:
-                raise Exception(f"Response status is {response.status}.")
+                raise Exception(f"Response status is {response.status}, response: {await response.text()}.")
         
     async def async_futures_create_sell_stop_market_order(self, symbol: str, stop_price: float, session: aiohttp.ClientSession) -> OrderResponse:
         """Creates a futures sell stop market order.
@@ -680,4 +679,4 @@ class BinanceClientManager():
                 )
                 return order_response
             else:
-                raise Exception(f"Response status is {response.status}.")
+                raise Exception(f"Response status is {response.status}, response: {await response.text()}.")
