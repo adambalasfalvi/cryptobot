@@ -6,6 +6,7 @@ import time
 import threading
 import asyncio
 import aiohttp
+import queue
 from datetime import datetime
 from datetime import timedelta
 from logging import Logger
@@ -39,7 +40,7 @@ class SzalaiStrategy:
 
         This constructor sets up the logger, initializes the client and WebSocket managers,
         determines the initial trading side (LONG or SHORT), and prepares the list of kline
-        data objects and order responses. It also sets up initial signals for trading decisions.
+        data objects and order responses.
         """
         self.logger = self.__init_logger() 
         self.client_manager = BinanceClientManager(logger=self.logger)
@@ -61,6 +62,7 @@ class SzalaiStrategy:
         self.trading_symbol_position_order: OrderResponse
         self.trading_symbol_take_profit_order: OrderResponse
         self.trading_symbol_stop_loss_order : OrderResponse
+        self.exception_queue = queue.Queue()
 
 
     def start_strategy(self) -> None:
@@ -105,14 +107,6 @@ class SzalaiStrategy:
 
         # Start the WebSocket manager to receive real-time updates for market data and user data
         self.websocket_manager.start_websocket()
-
-        # REST API van helyette használva!
-        # Set up the WebSocket for futures kline (candlestick) data and provide a handler for updates
-        # self.websocket_manager.setup_futures_kline_multiplex_websocket(
-        #     szalai_strategy_config.TRADE_SYMBOLS,      # Symbols to monitor
-        #     self.interval.__str__(),       # Interval for kline data (e.g., 1m)
-        #     self.__update_kline_data_handler           # Handler method to process kline data updates
-        # )
 
         # Set up the WebSocket for user data to receive order updates and provide a handler for updates
         self.websocket_manager.setup_user_data_websocket(
@@ -164,24 +158,18 @@ class SzalaiStrategy:
         """
         Calculates what will be the side to begin with if a new symbol has been chosen.
 
-        This method converts the set interval to minutes, multiplies it with 3, and then uses it to get historical kline data.
-        From this data the starting side is get calculated: If the last two kline data shows decline, the starting side will be long, otherwise it will be short.
-        """
-        now = datetime.now()
-        rounded_time = now.replace(second=0, microsecond=0)
-        end_time = int(rounded_time.timestamp() * 1000) # This completed minute
-        start_time = end_time - 60000 # The minute before the completed minute
-        
-        # TODO: itt csak egy darab lezárt gyertyát kell lekérni
-        async with aiohttp.ClientSession() as session:
-            last_kline_data = await self.client_manager.async_futures_get_kline_data_time_range(self.trading_symbol, self.interval.__str__(), start_time, end_time, 2, session)
+        This method retrieves the historical kline data for the trading symbol and determines the starting side.
+        If the price has increased (close price is higher than open price), the starting side will be SHORT.
+        If the price has declined (close price is lower than open price), the starting side will be LONG.
+        """   
+        symbol_kline_data = next(kline_data for kline_data in self.kline_data_list if kline_data.symbol == self.trading_symbol)
 
-            # If price has increased
-            if float(last_kline_data[-1][1]) - float(last_kline_data[-1][4]) < 0:
-                self.side = Side.SHORT
-            # If declined
-            else:
-                self.side = Side.LONG
+        # If price has increased
+        if symbol_kline_data.open_price - symbol_kline_data.close_price < 0:
+            self.side = Side.SHORT
+        # If declined
+        else:
+            self.side = Side.LONG
         
         self.logger.info(f"The calculated first trading side is {self.side}.")
     
@@ -233,7 +221,7 @@ class SzalaiStrategy:
             next_trigger = server_time.replace(day=1) + self.interval.timedelta
             next_trigger = next_trigger.replace(day=1)
 
-        next_trigger = next_trigger.replace(second=5, microsecond=0)
+        next_trigger = next_trigger.replace(second=0, microsecond=0)
         self.logger.info(f"Next trigger is set to {next_trigger}.")
         return next_trigger
     
@@ -251,13 +239,6 @@ class SzalaiStrategy:
             if time_to_sleep > 0:
                 time.sleep(time_to_sleep)
 
-            # sleep_interval = 0.1 # seconds
-            # elapsed_time = 0
-
-            # while not self.stop_event.is_set() and elapsed_time < time_to_sleep:
-            #     time.sleep(sleep_interval)
-            #     elapsed_time += sleep_interval
-
             if self.stop_event.is_set():
                 break
     
@@ -267,33 +248,6 @@ class SzalaiStrategy:
                     self.state = State.COLLECTING_DATA
 
             self.logger.info(f"The configured {self.interval.value} interval has been triggered.")
-
-    def __check_orders(self) -> None:
-        """
-        Checks whether there is time to place new orders.
-
-        This method examines the current order list to determine if there are any discrepancies or
-        conditions that warrant setting up new orders. It ensures that the number of active orders
-        is as expected and closes positions for symbols if necessary.
-        """
-        self.logger.debug("Checking orders.")
-        # If there are no orders, set up orders
-        if not self.order_list:
-            self.logger.debug("Order list is empty.")
-            asyncio.create_task(self.__set_up_orders())
-        else:
-            # Filter active orders of certain types and statuses
-            active_orders = [order for order in self.order_list if (order.type in ["STOP_MARKET", "TAKE_PROFIT_MARKET"]) and order.status == "NEW"]
-            self.logger.debug(f"Active orders: {', '.join(str(order) for order in active_orders)}")
-            # If there are no active orders, set up new orders
-            if not active_orders:
-                asyncio.create_task(self.__set_up_orders())
-            # If the count of active orders is not as expected, first close open positions and then set up new orders
-            elif len(active_orders) != 2:              
-                current_symbol = next(order for order in self.order_list if order.status == "NEW").symbol
-                self.logger.debug("Active orders count is not equal to 2.")
-                self.__close_open_positions_and_orders_for_symbol(current_symbol)
-                asyncio.create_task(self.__set_up_orders())
 
     def __is_balance_change_limit_reached(self) -> bool:
         """
@@ -338,22 +292,6 @@ class SzalaiStrategy:
             self.logger.info(f"The symbol {self.trading_symbol} does not reach the preset minimal change of {szalai_strategy_config.MIN_CHANGE}.")
             return False
 
-    # async verzió van helyette használva!
-    # def __update_kline_data_for_all_symbol(self) -> None:
-    #     """
-    #     Gets the current kline data for all symbols listed in szalai_strategy_config concurrently.
-    #     """
-    #     with ThreadPoolExecutor(max_workers=len(szalai_strategy_config.TRADE_SYMBOLS)) as executor:
-    #         for kline_data in self.kline_data_list:
-    #             future = executor.submit(self.client_manager.futures_get_kline_data, kline_data.symbol, self.interval.__str__(), 1)
-    #             current_kline_data = future.result()
-    #             if current_kline_data:
-    #                 kline_data.interval = self.interval.__str__()
-    #                 kline_data.open_price = float(current_kline_data[0][1])
-    #                 kline_data.high_price = float(current_kline_data[0][2])
-    #                 kline_data.low_price = float(current_kline_data[0][3])
-    #                 kline_data.close_price = float(current_kline_data[0][4])
-
     async def __update_kline_data_for_all_symbol(self) -> None:
         """
         Gets the current kline data for all symbols listed in szalai_strategy_config concurrently.
@@ -380,6 +318,8 @@ class SzalaiStrategy:
                     kline_data.high_price = float(current_kline_data[0][2])
                     kline_data.low_price = float(current_kline_data[0][3])
                     kline_data.close_price = float(current_kline_data[0][4])
+                    kline_data.open_time = datetime.fromtimestamp(current_kline_data[0][0] / 1000)
+                    kline_data.close_time = datetime.fromtimestamp(current_kline_data[0][6] / 1000)
 
     async def __set_up_orders(self) -> bool:
         """
@@ -472,30 +412,6 @@ class SzalaiStrategy:
                 if position_amount < 0:
                     buy_market_order = self.client_manager.futures_create_buy_market_order(position_symbol, abs(position_amount))
                     self.order_list.append(buy_market_order)
-
-    # REST API van helyette használva!
-    # def __update_kline_data_handler(self, message: str) -> None:
-    #     """
-    #     Updates the kline (candlestick) data based on the incoming WebSocket message.
-
-    #     This method processes the kline data message, updates the relevant KlineData object,
-    #     and logs the update.
-    #     """
-
-    #     kline_event_time = (datetime.fromtimestamp(message["data"]["E"]/1000))
-    #     kline_start_time = (datetime.fromtimestamp(message["data"]["k"]["t"]/1000))
-    #     kline_close_time = (datetime.fromtimestamp(message["data"]["k"]["T"]/1000))
-        
-    #     self.logger.debug(f"Kline data update, kline_event_time: {kline_event_time}, kline_start_time: {kline_start_time}, kline_close_time: {kline_close_time}, message: {message}.")
-    #     kline_data = next((x for x in self.kline_data_list if x.symbol == message["data"]["s"]), None)
-    #     if kline_data is not None:
-    #         kline_data.interval = message["data"]["k"]["i"]
-    #         kline_data.open_price = float(message["data"]["k"]["o"])
-    #         kline_data.close_price = float(message["data"]["k"]["c"])
-    #         kline_data.high_price = float(message["data"]["k"]["h"])
-    #         kline_data.low_price = float(message["data"]["k"]["l"])
-            
-    #         self.signal_check_orders = True
 
     def __update_order_data_handler(self, message: str) -> None:
         """

@@ -1,3 +1,5 @@
+from datetime import datetime
+
 class KlineData:
     """
     Represents candlestick (k-line) data for a specific trading symbol.
@@ -9,9 +11,11 @@ class KlineData:
         close_price (float): The closing price of the k-line.
         high_price (float): The highest price of the k-line.
         low_price (float): The lowest price of the k-line.
+        open_time (datetime): The opening time of the k-line.
+        close_time (datetime): The closing time of the k-line.
     """
     
-    def __init__(self, symbol: str, interval: float, open_price: float, close_price: float, high_price: float, low_price: float) -> None:
+    def __init__(self, symbol: str, interval: float, open_price: float, close_price: float, high_price: float, low_price: float, open_time: datetime = None, close_time: datetime = None) -> None:
         """
         Initializes a new instance of the KlineData class.
 
@@ -22,6 +26,8 @@ class KlineData:
             close_price (float): The closing price of the k-line.
             high_price (float): The highest price of the k-line.
             low_price (float): The lowest price of the k-line.
+            open_time (datetime): The opening time of the k-line.
+            close_time (datetime): The closing time of the k-line.
         """
         self.symbol = symbol
         self.interval = interval
@@ -29,6 +35,8 @@ class KlineData:
         self.close_price = close_price
         self.high_price = high_price
         self.low_price = low_price
+        self.open_time = open_time
+        self.close_time = close_time
 
     @classmethod
     def from_symbol(cls, symbol: str):
@@ -86,5 +94,7 @@ class KlineData:
             f"open_price: {self.open_price}, "
             f"close_price: {self.close_price}, "
             f"high_price: {self.high_price}, "
-            f"low_price: {self.low_price}"
+            f"low_price: {self.low_price}, "
+            f"open_time: {self.open_time}, "
+            f"close_time: {self.close_time}"
         )

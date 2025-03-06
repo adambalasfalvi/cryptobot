@@ -323,37 +323,6 @@ class BinanceClientManager():
         self.logger.debug(f"Latest price for {symbol} is {latest_price}.")
         return latest_price
     
-    async def async_futures_get_kline_data_time_range(self, symbol: str, interval: str, start_time: int, end_time: int, limit: int, session: aiohttp.ClientSession) -> str:
-        """Retrieves historical kline (candlestick) data for a specific symbol within a given time range.
-
-        Parameters:
-            symbol (str): The trading pair or symbol (e.g., 'BTCUSDT') for which historical data is being requested.
-            interval (str): The time interval for each kline (e.g., 1m, 1h).
-            start_time (int): The start time in milliseconds for the data retrieval.
-            end_time (int): The end time in milliseconds for the data retrieval.
-            limit (int): The maximum number of klines to retrieve in a single request.
-            session (aiohttp.ClientSession): The aiohttp session to use for the request.
-
-        Returns:
-            str: The requested historical kline data.
-        """
-        url = f"{binance_config.BASE_URL}/fapi/v1/klines?symbol={symbol}&interval={interval}&startTime={start_time}&endTime={end_time}&limit={limit}"
-        self.logger.debug(
-            f"Getting kline data history for {symbol} symbol, "
-            f"interval: {interval}, "
-            f"start_time: {start_time}, "
-            f"end_time: {end_time}, "
-            f"limit: {limit}, "
-            f"url: {url}."
-        )
-
-        async with session.get(url) as response:
-            if response.status == 200:
-                data = await response.json()
-                return data
-            else:
-                raise Exception(f"Response status is {response.status}, response: {await response.text()}.")
-    
     async def async_futures_get_kline_data(self, symbol: str, interval: str, limit: int, session: aiohttp.ClientSession) -> str:
         """Retrieves kline (candlestick) data for a specific symbol.
 
