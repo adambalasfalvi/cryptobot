@@ -32,13 +32,10 @@ LEVERAGE = 1
 # START_POSITION = "SHORT"  # Options: "LONG" or "SHORT"
 
 # Multiplier for calculating stop loss price, e.g., 0.01 = 0.1% below entry price for long positions
-STOP_LOSS_MULTIPLIER = 0.7
+STOP_LOSS_MULTIPLIER = 0.8
 
 # Multiplier for calculating take profit price, e.g., 0.01 = 0.1% above entry price for long positions
-TAKE_PROFIT_MULTIPLIER = 0.7
-
-# Max number of retries if the internet connection is lost
-MAX_RETRIES = 3
+TAKE_PROFIT_MULTIPLIER = 0.8
 
 # Time interval in seconds to wait before retrying the connection
 RETRY_INTERVAL = 5

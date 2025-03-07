@@ -21,7 +21,21 @@ class BinanceClientManager():
         self.logger = logger
         self.client = Client(binance_config.API_KEY, binance_config.API_SECRET, testnet=binance_config.TESTNET)
 
-    def futures_get_symbol_precision_info(self, symbol: str) -> None:
+    def futures_get_current_all_open_orders(self, symbol: str) -> dict:
+        """
+        Retrieves all open futures orders for a given symbol.
+
+        Args:
+            symbol (str): Trading symbol.
+
+        Returns:
+            dict: A dictionary containing details of all open orders for the specified symbol.
+        """
+        self.logger.debug(f"Getting all open orders for {symbol}.")
+        response = self.client.futures_get_open_orders(symbol=symbol)
+        return response
+
+    def futures_get_symbol_precision_info(self, symbol: str) -> dict:
         """Gets symbol precision information.
 
         Args:
@@ -48,6 +62,7 @@ class BinanceClientManager():
         except StopIteration as e:
             self.logger.error(f"Error while getting symbol precision information, {str(e)}")
             self.logger.debug("Error while getting symbol precision information:", exc_info=True)
+            return None
     
     def futures_get_server_time(self) -> datetime:
         """Gets the current time from the Binance server.

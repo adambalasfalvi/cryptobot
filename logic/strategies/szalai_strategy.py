@@ -22,6 +22,7 @@ from logic.managers.binance_websocket_manager import BinanceWebsocketManager
 from configs import szalai_strategy_config
 from threading import Event
 from threading import Lock
+from requests.exceptions import ReadTimeout
 
 class SzalaiStrategy:
     """
@@ -62,7 +63,7 @@ class SzalaiStrategy:
         self.trading_symbol_position_order: OrderResponse
         self.trading_symbol_take_profit_order: OrderResponse
         self.trading_symbol_stop_loss_order : OrderResponse
-        self.exception_queue = queue.Queue()
+        self.interval_trigger_thread: threading.Thread
 
 
     def start_strategy(self) -> None:
@@ -79,13 +80,18 @@ class SzalaiStrategy:
         This method logs the stop event, stops the WebSocket connections, and closes all open positions
         and orders to halt trading activities.
         """
-        self.logger.info("Stopping Szalai strategy.")
+        self.logger.info("Stopping Szalai strategy...")
+        with self.state_lock:
+            self.state = State.STOPPED
         # Set the stop event to signal the run_strategy loop to exit
         self.stop_event.set()
         # Stop the WebSocket manager to cease receiving data
         self.websocket_manager.stop_websocket()
         # Close all open positions and orders for all symbols
         self.__close_open_positions_and_orders_for_all_symbols()
+        # Wait for the interval trigger thread to complete
+        self.interval_trigger_thread.join()
+        self.logger.info("Szalai strategy has stopped.")
     
     def __init_strategy(self) -> None:
         # Log the start of the strategy execution
@@ -102,8 +108,8 @@ class SzalaiStrategy:
                 executor.submit(self.client_manager.futures_change_leverage, symbol, szalai_strategy_config.LEVERAGE)
         
         # Start the interval trigger thread
-        thread = threading.Thread(target=self.__set_interval_trigger)
-        thread.start()
+        self.interval_trigger_thread = threading.Thread(target=self.__set_interval_trigger)
+        self.interval_trigger_thread.start()
 
         # Start the WebSocket manager to receive real-time updates for market data and user data
         self.websocket_manager.start_websocket()
@@ -116,12 +122,12 @@ class SzalaiStrategy:
     async def __run_strategy(self) -> None:
         # Main strategy loop to continuously check and act upon various conditions until the stop event is set
         while not self.stop_event.is_set():
-            self.logger.debug(f"Current state: {self.state}.")
             with self.state_lock:
                 match self.state:
                     case State.INIT:
                         self.__get_precision_information_for_symbols()
                         self.__close_open_positions_and_orders_for_all_symbols()
+                        self.logger.info("Updating state to NO_TRADE.")
                         self.state = State.NO_TRADE
                     case State.NO_TRADE:
                         # Wait for the interval trigger to set the state to COLLECTING_DATA
@@ -131,12 +137,15 @@ class SzalaiStrategy:
                         self.__get_most_volatile_symbol()
                         if self.__check_change_rate():
                             await self.__calculate_first_side()
+                            self.logger.info("Updating state to TAKING_POSITION.")
                             self.state = State.TAKING_POSITION
                         else:
+                            self.logger.info("Updating state to NO_TRADE.")
                             self.state = State.NO_TRADE
                     case State.TAKING_POSITION:               
                         self.__calculate_quantity()
                         if await self.__set_up_orders():
+                            self.logger.info("Updating state to TRADE.")
                             self.state = State.TRADE
                         else:
                             self.__close_open_positions_and_orders_for_symbol(self.trading_symbol)
@@ -146,13 +155,35 @@ class SzalaiStrategy:
                     case State.ORDER_FILLED:
                         if self.__is_balance_change_limit_reached():
                             self.__close_open_positions_and_orders_for_symbol(self.trading_symbol)
+                            self.logger.info("Updating state to NO_TRADE.")
                             self.state = State.NO_TRADE
                         else:
                             self.__close_open_positions_and_orders_for_symbol(self.trading_symbol)
+                            self.logger.info("Updating state to TAKING_POSITION.")
                             self.state = State.TAKING_POSITION
-                    case State.ORDER_CANCELED:
+                    case State.FIRST_ORDER_CANCELED:
                         self.__close_open_positions_and_orders_for_symbol(self.trading_symbol)
+                        self.logger.info("Updating state to WAITING_FOR_SECOND_ORDER_CANCEL.")
+                        self.state = State.WAITING_FOR_SECOND_ORDER_CANCEL
+                    case State.WAITING_FOR_SECOND_ORDER_CANCEL:
+                        # Wait for the second order to be canceled in __update_order_data_handler
+                        pass
+                    case State.SECOND_ORDER_CANCELED:
+                        self.logger.info("Updating state to TAKING_POSITION.")
                         self.state = State.TAKING_POSITION
+                    case State.CONNECTION_LOST:
+                        # Waiting until connection is restored
+                        pass
+                    case State.CONNECTION_RESTORED:
+                        if self.__how_many_orders_are_open(self.trading_symbol) != 2:
+                            self.__close_open_positions_and_orders_for_symbol(self.trading_symbol)
+                            self.logger.info("Updating state to TAKING_POSITION.")
+                            self.state = State.TAKING_POSITION
+                        else:
+                            self.logger.info("Updating state to TRADE.")
+                            self.state = State.TRADE
+                    case State.STOPPED:
+                        pass
     
     async def __calculate_first_side(self) -> None:
         """
@@ -230,24 +261,57 @@ class SzalaiStrategy:
         Set the interval trigger at the configured interval.
         """
         while not self.stop_event.is_set():
-            server_time = self.client_manager.futures_get_server_time()
-            trigger_time = self.__calculate_trigger_time(server_time)
-            time_to_sleep = (trigger_time - server_time).total_seconds()
-            self.logger.debug(f"Time to sleep: {time_to_sleep} seconds.")
+            try:
+                server_time = self.client_manager.futures_get_server_time()
 
-            # Sleep until the next trigger time
-            if time_to_sleep > 0:
-                time.sleep(time_to_sleep)
+                # Only set the state to CONNECTION_RESTORED if the current state is CONNECTION_LOST
+                with self.state_lock:
+                    if self.state == State.CONNECTION_LOST:
+                        self.logger.info("Connection restored. Updating state to CONNECTION_RESTORED.")
+                        self.state = State.CONNECTION_RESTORED
 
-            if self.stop_event.is_set():
-                break
-    
-            # Only set the state to COLLECTING_DATA if the current state is NO_TRADE
-            with self.state_lock:
-                if self.state == State.NO_TRADE:
-                    self.state = State.COLLECTING_DATA
+                trigger_time = self.__calculate_trigger_time(server_time)
+                time_to_sleep = (trigger_time - server_time).total_seconds()
+                self.logger.debug(f"Time to sleep: {time_to_sleep} seconds.")
 
-            self.logger.info(f"The configured {self.interval.value} interval has been triggered.")
+                # Sleep until the next trigger time
+                if time_to_sleep > 0:
+                    time.sleep(time_to_sleep)
+
+                if self.stop_event.is_set():
+                    break
+        
+                # Only set the state to COLLECTING_DATA if the current state is NO_TRADE
+                with self.state_lock:
+                    if self.state == State.NO_TRADE:
+                        self.logger.info("Updating state to COLLECTING_DATA.")
+                        self.state = State.COLLECTING_DATA
+
+                self.logger.info(f"The configured {self.interval.value} interval has been triggered.")
+            
+            except Exception as e:
+                self.logger.error(f"Internet connection has been lost, retry in {szalai_strategy_config.RETRY_INTERVAL} seconds.")
+                with self.state_lock:
+                    if self.state != State.CONNECTION_LOST:
+                        self.logger.info("Updating state to CONNECTION_LOST.")
+                        self.state = State.CONNECTION_LOST
+                time.sleep(szalai_strategy_config.RETRY_INTERVAL)
+
+    def __how_many_orders_are_open(self, symbol: str) -> int:
+        """
+        Get the number of open orders for a symbol.
+
+        This method retrieves all open futures orders for the current trading symbol
+        and returns the number of open orders.
+
+        Returns:
+            int: The number of open orders for the trading symbol.
+        """
+        self.logger.debug(f"Checking how many open orders are for symbol {symbol}.")
+        symbol_orders = self.client_manager.futures_get_current_all_open_orders(symbol)
+        self.logger.debug(f"Symbol {symbol} has {len(symbol_orders)} open order(s).")
+        return len(symbol_orders)
+
 
     def __is_balance_change_limit_reached(self) -> bool:
         """
@@ -366,7 +430,7 @@ class SzalaiStrategy:
         self.logger.info(f"Closing all open positions and orders for {symbol}.")
         with ThreadPoolExecutor() as executor:
             # Cancel all open orders for the symbol
-            executor.submit(self.client_manager.futures_cancel_all_open_orders, symbol)
+            cancel_future = executor.submit(self.client_manager.futures_cancel_all_open_orders, symbol)
 
             # Get position information and close any open positions
             position_info_future = executor.submit(self.client_manager.futures_get_position_information, symbol)
@@ -383,6 +447,9 @@ class SzalaiStrategy:
                 buy_market_order = self.client_manager.futures_create_buy_market_order(symbol, abs(position_amount))
                 self.order_list.append(buy_market_order)
 
+            # Wait for the cancel future to complete
+            cancel_future.result()
+
     def __close_open_positions_and_orders_for_all_symbols(self) -> None:
         """
         Closes all open positions and orders for all symbols.
@@ -395,23 +462,29 @@ class SzalaiStrategy:
         with ThreadPoolExecutor(max_workers=len(szalai_strategy_config.TRADE_SYMBOLS) * 2) as executor:
 
             # Cancel all open orders for all symbols concurrently
-            for symbol in szalai_strategy_config.TRADE_SYMBOLS:
-                executor.submit(self.client_manager.futures_cancel_all_open_orders, symbol)
+            cancel_futures = {symbol: executor.submit(self.client_manager.futures_cancel_all_open_orders, symbol) for symbol in szalai_strategy_config.TRADE_SYMBOLS}
             
             # Get position information and close any positions for all symbols concurrently
-            for position_info_result in executor.map(self.client_manager.futures_get_position_information, szalai_strategy_config.TRADE_SYMBOLS):
-                position_symbol = next(x["symbol"] for x in position_info_result)
+            position_info_futures = {symbol: executor.submit(self.client_manager.futures_get_position_information, symbol) for symbol in szalai_strategy_config.TRADE_SYMBOLS}
+            
+            # Get position information and close any positions for all symbols concurrently
+            for symbol, future in position_info_futures.items():
+                position_info_result = future.result()
                 position_amount = float(next(x["positionAmt"] for x in position_info_result))
 
                 # If the position amount is positive, sell it
                 if position_amount > 0:
-                    sell_market_order = self.client_manager.futures_create_sell_market_order(position_symbol, position_amount)
+                    sell_market_order = self.client_manager.futures_create_sell_market_order(symbol, position_amount)
                     self.order_list.append(sell_market_order)
 
                 # If the position amount is negative, buy it
                 if position_amount < 0:
-                    buy_market_order = self.client_manager.futures_create_buy_market_order(position_symbol, abs(position_amount))
+                    buy_market_order = self.client_manager.futures_create_buy_market_order(symbol, abs(position_amount))
                     self.order_list.append(buy_market_order)
+            
+            # Wait for all cancel futures to complete
+            for symbol, future in cancel_futures.items():
+                future.result()
 
     def __update_order_data_handler(self, message: str) -> None:
         """
@@ -433,10 +506,21 @@ class SzalaiStrategy:
 
                 if (order.type in ["STOP_MARKET", "TAKE_PROFIT_MARKET"]) and order.status == "CANCELED":
                     self.logger.info(f"{order.type} order has been canceled, {order}.")
-                    self.state = State.ORDER_CANCELED
+                    self.logger.info(f"Updating state to ORDER_CANCELED.")
+
+                    if self.state == State.STOPPED:
+                        return
+
+                    if self.state == State.WAITING_FOR_SECOND_ORDER_CANCEL:
+                        self.logger.info("Updating state to SECOND_ORDER_CANCELED.")
+                        self.state = State.SECOND_ORDER_CANCELED
+                    else:
+                        self.logger.info("Updating state to FIRST_ORDER_CANCELED.")
+                        self.state = State.FIRST_ORDER_CANCELED
 
                 if (order.type in ["STOP_MARKET", "TAKE_PROFIT_MARKET"]) and order.status == "FILLED":
                     self.logger.info(f"{order.type} order has been filled, {order}.")
+                    self.logger.info(f"Updating state to ORDER_FILLED.")
                     self.state = State.ORDER_FILLED
 
     async def __create_position_order(self, symbol: str, quantity: float, side: Side, session: aiohttp.ClientSession) -> None:
