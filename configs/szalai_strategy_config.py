@@ -1,10 +1,6 @@
 # List of trading symbols to be used in the strategy
-# TRADE_SYMBOLS = [
-#     "BTCUSDT", "ETHUSDT", "BCHUSDT", "XRPUSDT", "EOSUSDT", "PEOPLEUSDT"
-# ]
-
 TRADE_SYMBOLS = [
-    "BTCUSDT"
+    "BTCUSDT", "ETHUSDT", "BCHUSDT", "XRPUSDT", "EOSUSDT", "PEOPLEUSDT"
 ]
 
 # Currency of the account being used for trading
