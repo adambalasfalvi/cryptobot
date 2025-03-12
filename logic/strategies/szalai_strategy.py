@@ -97,6 +97,10 @@ class SzalaiStrategy:
         # Log the start of the strategy execution
         self.logger.info("Starting Szalai strategy.")
 
+        # Check if all symbols exist in Binance
+        if not self.__check_if_all_symbol_exists_in_binance():
+            raise ValueError("Not all symbols exist in Binance. Please check the symbols in the config.")
+
         # Fetch and store the initial account balance
         self.start_account_balance = self.client_manager.futures_get_account_balance(szalai_strategy_config.ACCOUNT_CURRENCY)
         self.logger.info(f"Start account balance is {self.start_account_balance} {szalai_strategy_config.ACCOUNT_CURRENCY}.")
@@ -184,6 +188,23 @@ class SzalaiStrategy:
                             self.state = State.TRADE
                     case State.STOPPED:
                         pass
+    
+    def __check_if_all_symbol_exists_in_binance(self) -> bool:
+        """
+        Check if all symbols in szalai_strategy_config.TRADE_SYMBOLS exist in Binance.
+
+        Returns:
+            bool: True if all symbols exist, False otherwise.
+        """
+        exchange_info = self.client_manager.futures_get_exchange_info()
+        all_symbols = [symbol_info["symbol"] for symbol_info in exchange_info["symbols"]]
+        not_found_symbols = [symbol for symbol in szalai_strategy_config.TRADE_SYMBOLS if symbol not in all_symbols]
+        if len(not_found_symbols) == 0:
+            self.logger.info("All symbols in config exist in Binance.")
+            return True
+        else:
+            self.logger.error(f"Symbols not found in Binance: {not_found_symbols}.")
+            return False
     
     async def __calculate_first_side(self) -> None:
         """

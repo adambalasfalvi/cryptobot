@@ -21,6 +21,16 @@ class BinanceClientManager():
         self.logger = logger
         self.client = Client(binance_config.API_KEY, binance_config.API_SECRET, testnet=binance_config.TESTNET)
 
+    def futures_get_exchange_info(self) -> dict:
+        """Gets the exchange information for the Binance futures market.
+
+        Returns:
+            dict: Exchange information for the Binance futures market.
+        """
+        response = self.client.futures_exchange_info()
+        self.logger.debug("Exchange information has been retrieved.")
+        return response
+
     def futures_get_current_all_open_orders(self, symbol: str) -> dict:
         """
         Retrieves all open futures orders for a given symbol.
@@ -277,7 +287,7 @@ class BinanceClientManager():
             str: Response from the cancel order request.
         """
         response = self.client.futures_cancel_all_open_orders(symbol=symbol)
-        self.logger.debug(f"All open future orders have been cancelled.")
+        self.logger.debug(f"All open future orders for symbol {symbol} have been cancelled.")
         return response
         
     def futures_change_leverage(self, symbol: str, leverage: int) -> str:
