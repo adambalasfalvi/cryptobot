@@ -1,12 +1,12 @@
 # API key for authenticating with the Binance API.
-API_KEY = "6651cae9cde1ee897760de41a42d78e22159120d08ed7ab85bf656324e6dc1cd"
+API_KEY = "hoyinEKcYyPHBf7DSOL4YscSjpX8iRKs1Sj03WjxWsh2r1iFeYcChjD80HsWY342"
 
 # API secret for authenticating with the Binance API.
-API_SECRET = "06a9d06c6abf7fd1ee67e504debd5e0008987e016051324acfac1630bec6294c"
+API_SECRET = "NElUR1utqiVuX4MM4g8dtQ1XtqxrZBYlGhwUDYSQIGa30jhkO1WPxbDeNyTZJz9y"
 
 # Boolean flag indicating whether to use the Binance testnet environment.
 # Set to True for testnet (for testing purposes) and False for the live environment.
-TESTNET = True
+TESTNET = False
 
 if TESTNET:
     BASE_URL = "https://testnet.binancefuture.com"

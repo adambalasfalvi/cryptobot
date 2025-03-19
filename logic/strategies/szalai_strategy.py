@@ -353,13 +353,13 @@ class SzalaiStrategy:
         max_negative_balance_change = 1 - szalai_strategy_config.MAX_NEGATIVE_ACCOUNT_BALANCE_CHANGE      
         # Check if the change exceeds the maximum allowed
         if account_balance_change > max_positive_balance_change:
-            self.logger.info(f"Max positive account balance change of {szalai_strategy_config.MAX_POSITIVE_ACCOUNT_BALANCE_CHANGE} has been reached.")
+            self.logger.info(f"Max positive account balance change of {szalai_strategy_config.MAX_POSITIVE_ACCOUNT_BALANCE_CHANGE} has been reached trading symbol {self.trading_symbol}.")
             self.logger.info(f"A new symbol is to be searched.")
             # Reinitialize the starting balance
             self.start_account_balance = current_account_balance
             return True
         elif max_negative_balance_change > account_balance_change:
-            self.logger.info(f"Max negative account balance change of {szalai_strategy_config.MAX_NEGATIVE_ACCOUNT_BALANCE_CHANGE} has been reached.")
+            self.logger.info(f"Max negative account balance change of {szalai_strategy_config.MAX_NEGATIVE_ACCOUNT_BALANCE_CHANGE} has been reached trading symbol {self.trading_symbol}.")
             self.logger.info(f"A new symbol is to be searched.")
             # Reinitialize the starting balance
             self.start_account_balance = current_account_balance
@@ -527,9 +527,8 @@ class SzalaiStrategy:
 
                 if (order.type in ["STOP_MARKET", "TAKE_PROFIT_MARKET"]) and order.status == "CANCELED":
                     self.logger.info(f"{order.type} order has been canceled, {order}.")
-                    self.logger.info(f"Updating state to ORDER_CANCELED.")
 
-                    if self.state == State.STOPPED:
+                    if self.state == State.NO_TRADE or self.state == State.STOPPED:
                         return
 
                     if self.state == State.WAITING_FOR_SECOND_ORDER_CANCEL:
@@ -600,7 +599,7 @@ class SzalaiStrategy:
         """
         self.trading_symbol_kline_data = max(self.kline_data_list, key=lambda x: x.change)
         self.trading_symbol = self.trading_symbol_kline_data.symbol
-        self.logger.info(f"Most volatile symbol is {self.trading_symbol_kline_data.symbol}, change is {round(self.trading_symbol_kline_data.change, 2)}.")
+        self.logger.info(f"Most volatile symbol is {self.trading_symbol_kline_data.symbol}, change is {round(self.trading_symbol_kline_data.change, 4)}.")
 
     def __calculate_take_profit_price(self, price: float, side: Side) -> float:
         """
