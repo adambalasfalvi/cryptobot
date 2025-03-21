@@ -456,7 +456,7 @@ class SzalaiStrategy:
             # Get position information and close any open positions
             position_info_future = executor.submit(self.client_manager.futures_get_position_information, symbol)
             position_info_result = position_info_future.result()
-            position_amount = float(next((x["positionAmt"] for x in position_info_result)))
+            position_amount = float(next((x["positionAmt"] for x in position_info_result), 0))
 
             # If the position amount is positive, sell it
             if position_amount > 0:
@@ -491,7 +491,7 @@ class SzalaiStrategy:
             # Get position information and close any positions for all symbols concurrently
             for symbol, future in position_info_futures.items():
                 position_info_result = future.result()
-                position_amount = float(next(x["positionAmt"] for x in position_info_result))
+                position_amount = float(next((x["positionAmt"] for x in position_info_result), 0))
 
                 # If the position amount is positive, sell it
                 if position_amount > 0:
