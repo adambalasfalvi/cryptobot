@@ -1,15 +1,14 @@
 from calendar import c
-import os
+from locale import currency
 import sys
 import logging
 import logging.handlers
 import time
 import threading
 import asyncio
+from turtle import st
 import aiohttp
-import queue
-from datetime import date, datetime
-from datetime import timedelta
+from datetime import datetime
 from logging import Logger
 from concurrent.futures import ThreadPoolExecutor
 from models.order_response import OrderResponse
@@ -23,7 +22,6 @@ from logic.managers.binance_websocket_manager import BinanceWebsocketManager
 from configs import szalai_strategy_config
 from threading import Event
 from threading import Lock
-from requests.exceptions import ReadTimeout
 
 class SzalaiStrategy:
     """
@@ -50,9 +48,10 @@ class SzalaiStrategy:
         self.side : Side
         self.state: State = State.INIT
         self.state_lock : Lock = Lock()
+        self.currency = szalai_strategy_config.ACCOUNT_CURRENCY
         self.risk_usd = szalai_strategy_config.RISK_USD
         self.interval = next(interval for interval in Interval if interval.value == szalai_strategy_config.BAR_INTERVAL) 
-        self.kline_data_list: list[KlineData] = []
+        self.kline_data_list: list[KlineData] = [KlineData.from_symbol(symbol) for symbol in szalai_strategy_config.TRADE_SYMBOLS]
         self.symbol_info_list: list[Symbol] = []
         self.order_list: list[OrderResponse] = []
         self.start_account_balance: float
@@ -103,8 +102,10 @@ class SzalaiStrategy:
             raise ValueError("Not all symbols exist in Binance. Please check the symbols in the config.")
 
         # Fetch and store the initial account balance
-        self.start_account_balance = self.client_manager.futures_get_account_balance(szalai_strategy_config.ACCOUNT_CURRENCY)
-        self.logger.info(f"Start account balance is {self.start_account_balance} {szalai_strategy_config.ACCOUNT_CURRENCY}.")
+        self.start_account_balance = self.client_manager.futures_get_account_balance(self.currency)
+        if self.start_account_balance == -1:
+            raise ValueError(f"Currency {self.currency} not found in account balances. Please check the account balance in the config.")
+        self.logger.info(f"Start account balance is {self.start_account_balance} {self.currency}.")
 
         # Set the leverage for each trading symbol
         with ThreadPoolExecutor(max_workers=len(szalai_strategy_config.TRADE_SYMBOLS)) as executor:
@@ -160,12 +161,24 @@ class SzalaiStrategy:
                     case State.ORDER_FILLED:
                         if self.__is_balance_change_limit_reached():
                             self.__close_open_positions_and_orders_for_symbol(self.trading_symbol)
-                            self.logger.info("Updating state to NO_TRADE.")
-                            self.state = State.NO_TRADE
+                            self.logger.info("Updating state to WAITING_FOR_CANCEL_WHEN_BALANCE_CHANGE_LIMIT_REACHED.")
+                            self.state = State.WAITING_FOR_CANCEL_WHEN_BALANCE_CHANGE_LIMIT_REACHED
                         else:
                             self.__close_open_positions_and_orders_for_symbol(self.trading_symbol)
-                            self.logger.info("Updating state to TAKING_POSITION.")
-                            self.state = State.TAKING_POSITION
+                            self.logger.info("Updating state to WAITING_FOR_CANCEL_WHEN_BALANCE_CHANGE_LIMIT_NOT_REACHED.")
+                            self.state = State.WAITING_FOR_CANCEL_WHEN_BALANCE_CHANGE_LIMIT_NOT_REACHED
+                    case State.WAITING_FOR_CANCEL_WHEN_BALANCE_CHANGE_LIMIT_REACHED:
+                        # Wait for the order to be canceled in __update_order_data_handler
+                        pass
+                    case State.WAITING_FOR_CANCEL_WHEN_BALANCE_CHANGE_LIMIT_NOT_REACHED:
+                        # Wait for the order to be canceled in __update_order_data_handler
+                        pass
+                    case State.ORDER_CANCELED_WHEN_BALANCE_CHANGE_LIMIT_REACHED:
+                        self.logger.info("Updating state to NO_TRADE.")
+                        self.state = State.NO_TRADE
+                    case State.ORDER_CANCELED_WHEN_BALANCE_CHANGE_LIMIT_NOT_REACHED:
+                        self.logger.info("Updating state to TAKING_POSITION.")
+                        self.state = State.TAKING_POSITION
                     case State.FIRST_ORDER_CANCELED:
                         self.__close_open_positions_and_orders_for_symbol(self.trading_symbol)
                         self.logger.info("Updating state to WAITING_FOR_SECOND_ORDER_CANCEL.")
@@ -308,7 +321,6 @@ class SzalaiStrategy:
         self.logger.debug(f"Symbol {symbol} has {len(symbol_orders)} open order(s).")
         return len(symbol_orders)
 
-
     def __is_balance_change_limit_reached(self) -> bool:
         """
         Checks if the account balance change limit has been reached.
@@ -371,18 +383,20 @@ class SzalaiStrategy:
                 # Check if its an Exception
                 if isinstance(current_kline_data, Exception):
                     self.logger.error(f"Error fetching kline data for {kline_data.symbol}: {current_kline_data}")
-                    continue
+                    continue              
 
-                current_kline_data = str(current_kline_data)
-
-                if current_kline_data:
-                    kline_data.interval = self.interval.timedelta
-                    kline_data.open_price = float(current_kline_data[0][1])
-                    kline_data.high_price = float(current_kline_data[0][2])
-                    kline_data.low_price = float(current_kline_data[0][3])
-                    kline_data.close_price = float(current_kline_data[0][4])
-                    kline_data.open_time = datetime.fromtimestamp(int(current_kline_data[0][0]) / 1000)
-                    kline_data.close_time = datetime.fromtimestamp(int(current_kline_data[0][6]) / 1000)
+                if current_kline_data and isinstance(current_kline_data, list) and len(current_kline_data) > 0:
+                    try:
+                        kline_data.interval = self.interval.timedelta
+                        kline_data.open_price = float(current_kline_data[0][1])
+                        kline_data.high_price = float(current_kline_data[0][2])
+                        kline_data.low_price = float(current_kline_data[0][3])
+                        kline_data.close_price = float(current_kline_data[0][4])
+                        kline_data.open_time = datetime.fromtimestamp(int(current_kline_data[0][0]) / 1000)
+                        kline_data.close_time = datetime.fromtimestamp(int(current_kline_data[0][6]) / 1000)
+                    except (IndexError, ValueError, TypeError) as e:
+                        self.logger.error(f"Error processing kline data for {kline_data.symbol}: {e}")
+                        continue
 
     async def __set_up_orders(self) -> bool:
         """
@@ -392,6 +406,7 @@ class SzalaiStrategy:
         It also sets up the stop loss and take profit orders for the position.
         """
         self.logger.info(f"Setting up orders for symbol {self.trading_symbol}.")
+        # TODO: check if there is enough balance to place the order
         try:
             async with aiohttp.ClientSession() as session:
                 await self.__create_position_order(self.trading_symbol, self.trading_symbol_quantity, self.side, session)
@@ -505,21 +520,44 @@ class SzalaiStrategy:
 
                 if (order.type in ["STOP_MARKET", "TAKE_PROFIT_MARKET"]) and order.status == "CANCELED":
                     self.logger.info(f"{order.type} order has been canceled, {order}.")
+                    self.__handle_canceled_order(order)
 
-                    if self.state == State.ORDER_FILLED or self.state == State.NO_TRADE or self.state == State.STOPPED:
-                        return
-
-                    if (order.type in ["STOP_MARKET", "TAKE_PROFIT_MARKET"]) and order.status == "FILLED":
-                        self.logger.info(f"{order.type} order has been filled, {order}.")
-                        self.logger.info(f"Updating state to ORDER_FILLED.")
-                        self.state = State.ORDER_FILLED
-
-                    if self.state == State.WAITING_FOR_SECOND_ORDER_CANCEL:
-                        self.logger.info("Updating state to SECOND_ORDER_CANCELED.")
-                        self.state = State.SECOND_ORDER_CANCELED
-                    else:
-                        self.logger.info("Updating state to FIRST_ORDER_CANCELED.")
-                        self.state = State.FIRST_ORDER_CANCELED
+    def __handle_canceled_order(self, order: OrderResponse) -> None:
+        """
+        Handles state transitions when an order is canceled.
+        
+        This method determines the appropriate state transition based on the current state
+        when a STOP_MARKET or TAKE_PROFIT_MARKET order is canceled.
+        
+        Args:
+            order: The canceled order
+        """
+        if self.state == State.ORDER_FILLED or self.state == State.NO_TRADE or self.state == State.STOPPED:
+            return
+    
+        if (order.type in ["STOP_MARKET", "TAKE_PROFIT_MARKET"]) and order.status == "FILLED":
+            self.logger.info(f"{order.type} order has been filled, {order}.")
+            self.logger.info(f"Updating state to ORDER_FILLED.")
+            self.state = State.ORDER_FILLED
+            return
+    
+        if self.state == State.WAITING_FOR_CANCEL_WHEN_BALANCE_CHANGE_LIMIT_REACHED:
+            self.logger.info("Updating state to ORDER_CANCELED_WHEN_BALANCE_CHANGE_LIMIT_REACHED.")
+            self.state = State.ORDER_CANCELED_WHEN_BALANCE_CHANGE_LIMIT_REACHED
+            return
+    
+        if self.state == State.WAITING_FOR_CANCEL_WHEN_BALANCE_CHANGE_LIMIT_NOT_REACHED:
+            self.logger.info("Updating state to ORDER_CANCELED_WHEN_BALANCE_CHANGE_LIMIT_NOT_REACHED.")
+            self.state = State.ORDER_CANCELED_WHEN_BALANCE_CHANGE_LIMIT_NOT_REACHED
+            return
+    
+        if self.state == State.WAITING_FOR_SECOND_ORDER_CANCEL:
+            self.logger.info("Updating state to SECOND_ORDER_CANCELED.")
+            self.state = State.SECOND_ORDER_CANCELED
+            return
+        
+        self.logger.info("Updating state to FIRST_ORDER_CANCELED.")
+        self.state = State.FIRST_ORDER_CANCELED
 
     async def __create_position_order(self, symbol: str, quantity: float, side: Side, session: aiohttp.ClientSession) -> None:
         """

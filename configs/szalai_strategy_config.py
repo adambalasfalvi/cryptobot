@@ -4,7 +4,7 @@ TRADE_SYMBOLS = [
 ]
 
 # Currency of the account being used for trading
-ACCOUNT_CURRENCY = "BNFCR"
+ACCOUNT_CURRENCY = "USDT"
 
 # Interval of the candlestick (kline) data, here set to 1 minute
 BAR_INTERVAL = "1m"

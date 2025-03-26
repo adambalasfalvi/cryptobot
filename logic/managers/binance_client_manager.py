@@ -311,15 +311,14 @@ class BinanceClientManager():
             currency (str): Currency symbol (e.g., "BTC").
 
         Returns:
-            float: Account balance for the specified currency, or 0.0 if currency not found.
+            float: Account balance for the specified currency, or -1 if currency not found.
         """
         self.logger.debug(f"Getting {currency} account balance.")
         accounts = self.client.futures_account_balance()
         account = next(filter(lambda x: x["asset"] == currency, accounts), None)
         
         if account is None:
-            self.logger.warning(f"Currency {currency} not found in account balances.")
-            balance = 0.0
+            balance = -1
         else:
             balance = float(account["balance"])
             

@@ -46,6 +46,13 @@ class KlineData:
         self.open_time = open_time
         self.close_time = close_time
 
+    @classmethod
+    def from_symbol(cls, symbol: str):
+        """
+        Creates an instance of KlineData with only the symbol specified.
+        """
+        return cls(symbol, timedelta(0), 0.0, 0.0, 0.0, 0.0, datetime.min, datetime.min)
+
     @property
     def change(self) -> float:
         """
