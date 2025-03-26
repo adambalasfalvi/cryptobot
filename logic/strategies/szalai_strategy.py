@@ -1,3 +1,4 @@
+from calendar import c
 import os
 import sys
 import logging
@@ -7,7 +8,7 @@ import threading
 import asyncio
 import aiohttp
 import queue
-from datetime import datetime
+from datetime import date, datetime
 from datetime import timedelta
 from logging import Logger
 from concurrent.futures import ThreadPoolExecutor
@@ -51,7 +52,7 @@ class SzalaiStrategy:
         self.state_lock : Lock = Lock()
         self.risk_usd = szalai_strategy_config.RISK_USD
         self.interval = next(interval for interval in Interval if interval.value == szalai_strategy_config.BAR_INTERVAL) 
-        self.kline_data_list: list[KlineData] = [KlineData.from_symbol(symbol) for symbol in szalai_strategy_config.TRADE_SYMBOLS]
+        self.kline_data_list: list[KlineData] = []
         self.symbol_info_list: list[Symbol] = []
         self.order_list: list[OrderResponse] = []
         self.start_account_balance: float
@@ -222,7 +223,7 @@ class SzalaiStrategy:
         # If declined
         else:
             self.side = Side.LONG
-        
+    
         self.logger.info(f"The calculated first trading side is {self.side}.")
     
     def __get_precision_information_for_symbols(self) -> None:
@@ -239,39 +240,13 @@ class SzalaiStrategy:
                     )
                 )
 
-    def __calculate_trigger_time(self, server_time: datetime) -> None:
+    def __calculate_trigger_time(self, server_time: datetime) -> datetime:
         """Calculate the next trigger time based on the interval."""
-        if self.interval == Interval.ONE_MINUTE:
-            next_trigger = server_time + self.interval.timedelta
-        elif self.interval == Interval.THREE_MINUTES:
-            next_trigger = server_time + self.interval.timedelta
-        elif self.interval == Interval.FIVE_MINUTES:
-            next_trigger = server_time + self.interval.timedelta
-        elif self.interval == Interval.FIFTEEN_MINUTES:
-            next_trigger = server_time + self.interval.timedelta
-        elif self.interval == Interval.THIRTY_MINUTES:
-            next_trigger = server_time + self.interval.timedelta
-        elif self.interval == Interval.ONE_HOUR:
-            next_trigger = server_time + self.interval.timedelta
-        elif self.interval == Interval.TWO_HOURS:
-            next_trigger = server_time + self.interval.timedelta
-        elif self.interval == Interval.FOUR_HOURS:
-            next_trigger = server_time + self.interval.timedelta
-        elif self.interval == Interval.SIX_HOURS:
-            next_trigger = server_time + self.interval.timedelta
-        elif self.interval == Interval.EIGHT_HOURS:
-            next_trigger = server_time + self.interval.timedelta
-        elif self.interval == Interval.TWELVE_HOURS:
-            next_trigger = server_time + self.interval.timedelta
-        elif self.interval == Interval.ONE_DAY:
-            next_trigger = server_time + self.interval.timedelta
-        elif self.interval == Interval.THREE_DAYS:
-            next_trigger = server_time + self.interval.timedelta
-        elif self.interval == Interval.ONE_WEEK:
-            next_trigger = server_time + self.interval.timedelta
-        elif self.interval == Interval.ONE_MONTH:
+        if self.interval == Interval.ONE_MONTH:
             next_trigger = server_time.replace(day=1) + self.interval.timedelta
             next_trigger = next_trigger.replace(day=1)
+        else:
+            next_trigger = server_time + self.interval.timedelta
 
         next_trigger = next_trigger.replace(second=0, microsecond=0)
         self.logger.info(f"Next trigger is set to {next_trigger}.")
@@ -396,15 +371,18 @@ class SzalaiStrategy:
                 # Check if its an Exception
                 if isinstance(current_kline_data, Exception):
                     self.logger.error(f"Error fetching kline data for {kline_data.symbol}: {current_kline_data}")
+                    continue
+
+                current_kline_data = str(current_kline_data)
 
                 if current_kline_data:
-                    kline_data.interval = self.interval.__str__()
+                    kline_data.interval = self.interval.timedelta
                     kline_data.open_price = float(current_kline_data[0][1])
                     kline_data.high_price = float(current_kline_data[0][2])
                     kline_data.low_price = float(current_kline_data[0][3])
                     kline_data.close_price = float(current_kline_data[0][4])
-                    kline_data.open_time = datetime.fromtimestamp(current_kline_data[0][0] / 1000)
-                    kline_data.close_time = datetime.fromtimestamp(current_kline_data[0][6] / 1000)
+                    kline_data.open_time = datetime.fromtimestamp(int(current_kline_data[0][0]) / 1000)
+                    kline_data.close_time = datetime.fromtimestamp(int(current_kline_data[0][6]) / 1000)
 
     async def __set_up_orders(self) -> bool:
         """
@@ -507,7 +485,7 @@ class SzalaiStrategy:
             for symbol, future in cancel_futures.items():
                 future.result()
 
-    def __update_order_data_handler(self, message: str) -> None:
+    def __update_order_data_handler(self, message: dict) -> None:
         """
         Updates the order data based on the incoming WebSocket message.
 
@@ -520,7 +498,7 @@ class SzalaiStrategy:
 
         with self.state_lock:
             if event_type == "ORDER_TRADE_UPDATE" and any(order.client_order_id == client_order_id for order in self.order_list):
-                status = message.get("o").get("X")
+                status = message.get("o", {}).get("X", None)
                 order = next(order for order in self.order_list if order.client_order_id == client_order_id)
                 order.status = status
                 self.logger.debug(f"Order has been updated, {order}.")
@@ -528,8 +506,13 @@ class SzalaiStrategy:
                 if (order.type in ["STOP_MARKET", "TAKE_PROFIT_MARKET"]) and order.status == "CANCELED":
                     self.logger.info(f"{order.type} order has been canceled, {order}.")
 
-                    if self.state == State.NO_TRADE or self.state == State.STOPPED:
+                    if self.state == State.ORDER_FILLED or self.state == State.NO_TRADE or self.state == State.STOPPED:
                         return
+
+                    if (order.type in ["STOP_MARKET", "TAKE_PROFIT_MARKET"]) and order.status == "FILLED":
+                        self.logger.info(f"{order.type} order has been filled, {order}.")
+                        self.logger.info(f"Updating state to ORDER_FILLED.")
+                        self.state = State.ORDER_FILLED
 
                     if self.state == State.WAITING_FOR_SECOND_ORDER_CANCEL:
                         self.logger.info("Updating state to SECOND_ORDER_CANCELED.")
@@ -537,11 +520,6 @@ class SzalaiStrategy:
                     else:
                         self.logger.info("Updating state to FIRST_ORDER_CANCELED.")
                         self.state = State.FIRST_ORDER_CANCELED
-
-                if (order.type in ["STOP_MARKET", "TAKE_PROFIT_MARKET"]) and order.status == "FILLED":
-                    self.logger.info(f"{order.type} order has been filled, {order}.")
-                    self.logger.info(f"Updating state to ORDER_FILLED.")
-                    self.state = State.ORDER_FILLED
 
     async def __create_position_order(self, symbol: str, quantity: float, side: Side, session: aiohttp.ClientSession) -> None:
         """

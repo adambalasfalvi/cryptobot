@@ -72,7 +72,7 @@ class BinanceClientManager():
         except StopIteration as e:
             self.logger.error(f"Error while getting symbol precision information, {str(e)}")
             self.logger.debug("Error while getting symbol precision information:", exc_info=True)
-            return None
+            return {}
     
     def futures_get_server_time(self) -> datetime:
         """Gets the current time from the Binance server.
@@ -277,20 +277,20 @@ class BinanceClientManager():
         )
         return order_response
     
-    def futures_cancel_all_open_orders(self, symbol: str) -> str:
+    def futures_cancel_all_open_orders(self, symbol: str) -> dict:
         """Cancels all open futures orders for a given symbol.
 
         Args:
             symbol (str): Trading symbol.
 
         Returns:
-            str: Response from the cancel order request.
+            dict: Response from the cancel order request.
         """
         response = self.client.futures_cancel_all_open_orders(symbol=symbol)
         self.logger.debug(f"All open future orders for symbol {symbol} have been cancelled.")
         return response
         
-    def futures_change_leverage(self, symbol: str, leverage: int) -> str:
+    def futures_change_leverage(self, symbol: str, leverage: int) -> dict:
         """Changes the leverage for a given symbol.
 
         Args:
@@ -311,16 +311,22 @@ class BinanceClientManager():
             currency (str): Currency symbol (e.g., "BTC").
 
         Returns:
-            float: Account balance for the specified currency.
+            float: Account balance for the specified currency, or 0.0 if currency not found.
         """
         self.logger.debug(f"Getting {currency} account balance.")
         accounts = self.client.futures_account_balance()
         account = next(filter(lambda x: x["asset"] == currency, accounts), None)
-        balance = float(account["balance"])
+        
+        if account is None:
+            self.logger.warning(f"Currency {currency} not found in account balances.")
+            balance = 0.0
+        else:
+            balance = float(account["balance"])
+            
         self.logger.debug(f"Balance is {balance} {currency}.")
         return balance
     
-    def futures_get_position_information(self, symbol: str) -> str:
+    def futures_get_position_information(self, symbol: str) -> dict:
         """Retrieves the position information for a given symbol.
 
         Args:

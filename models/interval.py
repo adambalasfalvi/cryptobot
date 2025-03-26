@@ -73,7 +73,9 @@ class Interval(Enum):
         elif self == Interval.ONE_WEEK:
             return timedelta(weeks=1)
         elif self == Interval.ONE_MONTH:
-            return timedelta(days=32)
+            return timedelta(days=30)
+        else:
+            return timedelta(minutes=1)  # Default case
     
     def __str__(self) -> str:
         """
@@ -106,9 +108,11 @@ class Interval(Enum):
             return "12h"
         elif self == Interval.ONE_DAY:
             return "1d"
-        elif self == Interval.THREE_DAYS:
-            return "3d"
         elif self == Interval.ONE_WEEK:
             return "1w"
         elif self == Interval.ONE_MONTH:
+            return "1M"
+        elif self == Interval.ONE_MONTH:
+            return "1m"
+        else:
             return "1m"

@@ -1,4 +1,5 @@
-from datetime import datetime
+from datetime import datetime, timedelta
+from typing import Optional
 
 class KlineData:
     """
@@ -6,7 +7,7 @@ class KlineData:
 
     Attributes:
         symbol (str): The trading symbol (e.g., 'BTCUSDT').
-        interval (float): The interval of the k-line data (e.g., 1m, 1h).
+        interval (timedelta): The interval of the k-line data (e.g., 1m, 1h).
         open_price (float): The opening price of the k-line.
         close_price (float): The closing price of the k-line.
         high_price (float): The highest price of the k-line.
@@ -15,13 +16,20 @@ class KlineData:
         close_time (datetime): The closing time of the k-line.
     """
     
-    def __init__(self, symbol: str, interval: float, open_price: float, close_price: float, high_price: float, low_price: float, open_time: datetime = None, close_time: datetime = None) -> None:
+    def __init__(self, symbol: str, 
+                 interval: timedelta, 
+                 open_price: float, 
+                 close_price: float, 
+                 high_price: float, 
+                 low_price: float, 
+                 open_time: datetime, 
+                 close_time: datetime) -> None:
         """
         Initializes a new instance of the KlineData class.
 
         Args:
             symbol (str): The trading symbol.
-            interval (float): The interval of the k-line data.
+            interval (timedelta): The interval of the k-line data.
             open_price (float): The opening price of the k-line.
             close_price (float): The closing price of the k-line.
             high_price (float): The highest price of the k-line.
@@ -38,19 +46,6 @@ class KlineData:
         self.open_time = open_time
         self.close_time = close_time
 
-    @classmethod
-    def from_symbol(cls, symbol: str):
-        """
-        Creates an instance of KlineData with only the symbol specified.
-
-        Args:
-            symbol (str): The trading symbol.
-
-        Returns:
-            KlineData: An instance of KlineData with other attributes set to None.
-        """
-        return cls(symbol, None, None, None, None, None)
-
     @property
     def change(self) -> float:
         """
@@ -58,6 +53,7 @@ class KlineData:
 
         Returns:
             float: The change of price change.
+            0.0: If open_price or close_price is None.
         """
         return abs((self.close_price - self.open_price) / self.open_price)
 
