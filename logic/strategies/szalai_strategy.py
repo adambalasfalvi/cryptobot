@@ -2,6 +2,7 @@ from calendar import c
 from hmac import new
 from locale import currency
 import sys
+import os
 import logging
 import logging.handlers
 import time
@@ -294,6 +295,10 @@ class SzalaiStrategy:
         """
         while not self.stop_event.is_set():
             try:
+                # Sync OS time
+                self.__sync_os_time()
+
+                # Get the server time from Binance
                 server_time = self.client_manager.futures_get_server_time()
 
                 # Only set the state to CONNECTION_RESTORED if the current state is CONNECTION_LOST
@@ -328,6 +333,34 @@ class SzalaiStrategy:
                         self.logger.info("Updating state to CONNECTION_LOST.")
                         self.state = State.CONNECTION_LOST
                 time.sleep(szalai_strategy_config.RETRY_INTERVAL)
+
+    def __sync_os_time(self) -> None:
+        """
+        Synchronizes the OS time on Windows platforms.
+        
+        This method attempts to synchronize the system clock on Windows using the w32tm utility.
+        It logs the result of the synchronization attempt.
+        """
+        if sys.platform == "win32":
+            self.logger.debug("Synchronizing OS time on Windows.")
+            try:
+                import subprocess
+                result = subprocess.run(
+                    ['w32tm', '/resync', '/force'], 
+                    stdout=subprocess.PIPE, 
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    creationflags=subprocess.CREATE_NO_WINDOW
+                )
+                
+                if result.returncode != 0:
+                    error_msg = result.stderr.strip() if result.stderr else f"Unknown error (code {result.returncode})"
+                    self.logger.warning(f"Time synchronization failed: {error_msg}")
+                else:
+                    self.logger.info("OS time synchronization completed successfully.")
+                    
+            except Exception as e:
+                self.logger.warning(f"Error during OS time sync: {e}")
 
     def __how_many_orders_are_open(self, symbol: str) -> int:
         """
@@ -557,19 +590,19 @@ class SzalaiStrategy:
                 self.logger.debug(f"Order has been updated, {order}.")
 
                 if order.type == "TAKE_PROFIT_MARKET" and order.status == "FILLED":
-                    self.logger.info(f"{order.type} order has been filled, {order}.")
+                    self.logger.info(f"{order.type} order has been filled.")
                     self.logger.info(f"Updating state to TAKE_PROFIT_ORDER_FILLED.")
                     self.state = State.TAKE_PROFIT_ORDER_FILLED
                     return
 
                 if order.type == "STOP_MARKET" and order.status == "FILLED":
-                    self.logger.info(f"{order.type} order has been filled, {order}.")
+                    self.logger.info(f"{order.type} order has been filled.")
                     self.logger.info(f"Updating state to STOP_MARKET_ORDER_FILLED.")
                     self.state = State.STOP_MARKET_ORDER_FILLED
                     return
 
                 if (order.type in ["STOP_MARKET", "TAKE_PROFIT_MARKET"]) and order.status == "CANCELED":
-                    self.logger.info(f"{order.type} order has been canceled, {order}.")
+                    self.logger.info(f"{order.type} order has been canceled.")
                     self.__handle_canceled_order(order)
 
     def __handle_canceled_order(self, order: OrderResponse) -> None:
