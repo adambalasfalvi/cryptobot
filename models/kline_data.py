@@ -63,6 +63,16 @@ class KlineData:
             0.0: If open_price or close_price is None.
         """
         return abs((self.close_price - self.open_price) / self.open_price)
+    
+    @property
+    def percentage_change(self) -> float:
+        """
+        Returns the price change as a percentage.
+
+        Returns:
+            float: The price change as a percentage.
+        """
+        return self.change * 100
 
     @property
     def is_updated(self) -> bool:
