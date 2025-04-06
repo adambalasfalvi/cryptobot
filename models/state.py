@@ -1,28 +1,20 @@
-from enum import Enum
+from enum import Enum, auto
 
 class State(Enum):
     """
     Enum representing the various states of the trading bot.
 
     States:
-        INIT (0): Initial state.
-        NO_TRADE (1): No trade state.
-        COLLECTING_DATA (2): Collecting data state.
-        TAKING_POSITION_AND_ORDERS (3): Taking position and orders state.
-        TRADE (4): Trade state.
-        TAKE_PROFIT_ORDER_FILLED (5): Take profit order filled state.
-        STOP_MARKET_ORDER_FILLED (6): Stop market order filled state.
-        WAITING_FOR_CANCEL_WHEN_BALANCE_CHANGE_LIMIT_REACHED (7): Waiting for order cancel when balance change limit is reached.
-        WAITING_FOR_CANCEL_WHEN_BALANCE_CHANGE_LIMIT_NOT_REACHED (8): Waiting for order cancel when balance change limit is not reached.
-        ORDER_CANCELED_WHEN_BALANCE_CHANGE_LIMIT_REACHED (9): Order canceled when balance change limit reached state.
-        ORDER_CANCELED_WHEN_BALANCE_CHANGE_LIMIT_NOT_REACHED (10): Order canceled when balance change limit not reached state.
-        FIRST_ORDER_CANCELED (11): First order canceled state.
-        WAITING_FOR_SECOND_ORDER_CANCEL (12): Waiting for second order cancel state.
-        SECOND_ORDER_CANCELED (13): Second order canceled state.
-        CLEARING_ORDERS (14): Clearing orders state.
-        CONNECTION_LOST (15): Lost internet connection state.
-        CONNECTION_RESTORED (16): Restored internet connection state.
-        STOPPED (17): Stopped state.
+        INIT: Initial state when the bot first starts.
+        NO_TRADE: State when the bot is not actively trading.
+        COLLECTING_DATA: State when the bot is collecting market data for analysis.
+        TAKING_POSITION_AND_ORDERS: State when the bot is creating position and order entries.
+        TRADE: State when the bot has active trades and is monitoring them.
+        TAKE_PROFIT_ORDER_FILLED: State when a take profit order has been filled.
+        STOP_MARKET_ORDER_FILLED: State when a stop market order has been filled.
+        CONNECTION_LOST: State when the internet connection has been lost.
+        CONNECTION_RESTORED: State when the internet connection has been restored.
+        STOPPED: State when the bot has been stopped and is shutting down.
     """
     INIT = 0
     NO_TRADE = 1
@@ -31,14 +23,6 @@ class State(Enum):
     TRADE = 4
     TAKE_PROFIT_ORDER_FILLED = 5
     STOP_MARKET_ORDER_FILLED = 6
-    WAITING_FOR_CANCEL_WHEN_BALANCE_CHANGE_LIMIT_REACHED = 7
-    WAITING_FOR_CANCEL_WHEN_BALANCE_CHANGE_LIMIT_NOT_REACHED = 8
-    ORDER_CANCELED_WHEN_BALANCE_CHANGE_LIMIT_REACHED = 9
-    ORDER_CANCELED_WHEN_BALANCE_CHANGE_LIMIT_NOT_REACHED = 10
-    FIRST_ORDER_CANCELED = 11
-    WAITING_FOR_SECOND_ORDER_CANCEL = 12
-    SECOND_ORDER_CANCELED = 13
-    CLEARING_ORDERS = 14
-    CONNECTION_LOST = 15
-    CONNECTION_RESTORED = 16
-    STOPPED = 17
+    CONNECTION_LOST = 7
+    CONNECTION_RESTORED = 8
+    STOPPED = 9

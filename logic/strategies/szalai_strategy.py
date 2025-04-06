@@ -1,19 +1,15 @@
-from calendar import c
-from hmac import new
-from locale import currency
 import sys
-import os
 import logging
 import logging.handlers
 import time
 import threading
 import asyncio
-from turtle import st
-from unittest import result
 import aiohttp
 from datetime import datetime
 from logging import Logger
 from concurrent.futures import ThreadPoolExecutor
+from models import order_error_code
+from models.order_error_code import OrderErrorCode
 from models.order_response import OrderResponse
 from models.side import Side
 from models.kline_data import KlineData
@@ -90,8 +86,8 @@ class SzalaiStrategy:
         self.stop_event.set()
         # Stop the WebSocket manager to cease receiving data
         self.websocket_manager.stop_websocket()
-        # Close all open positions and orders for all symbols
-        self.__close_open_positions_and_orders_for_all_symbols()
+        # Close all open positions and cancel all orders for all symbols
+        self.__close_open_positions_and_cancel_orders_for_all_symbols()
         # Wait for the interval trigger thread to complete
         self.interval_trigger_thread.join()
         self.logger.info("Szalai strategy has stopped.")
@@ -108,10 +104,10 @@ class SzalaiStrategy:
         self.start_account_balance = self.client_manager.futures_get_account_balance(self.currency)
         if self.start_account_balance == -1:
             raise ValueError(f"Currency {self.currency} not found in account balances. Please check the account balance in the config.")
-        self.logger.info(f"Start account balance is {self.start_account_balance} {self.currency}.")
+        self.logger.info(f"Start account balance is {round(self.start_account_balance, szalai_strategy_config.LOGGING_PRECISION)} {self.currency}.")
 
         # Set the leverage for each trading symbol
-        with ThreadPoolExecutor(max_workers=len(szalai_strategy_config.TRADE_SYMBOLS)) as executor:
+        with ThreadPoolExecutor() as executor:
             for symbol in szalai_strategy_config.TRADE_SYMBOLS:
                 # Submit a task to change the leverage for each symbol to the configured value
                 executor.submit(self.client_manager.futures_change_leverage, symbol, szalai_strategy_config.LEVERAGE)
@@ -135,7 +131,7 @@ class SzalaiStrategy:
                 match self.state:
                     case State.INIT:
                         self.__get_precision_information_for_symbols()
-                        self.__close_open_positions_and_orders_for_all_symbols()
+                        self.__close_open_positions_and_cancel_orders_for_all_symbols()
                         self.logger.info("Updating state to NO_TRADE.")
                         self.state = State.NO_TRADE
                     case State.NO_TRADE:
@@ -146,70 +142,64 @@ class SzalaiStrategy:
                         self.__get_most_volatile_symbol()
                         if self.__check_change_rate():
                             await self.__calculate_first_side()
-                            self.logger.info("Updating state to TAKING_POSITION.")
+                            self.logger.info("Updating state to TAKING_POSITION_AND_ORDERS.")
                             self.state = State.TAKING_POSITION_AND_ORDERS
                         else:
                             self.logger.info("Updating state to NO_TRADE.")
                             self.state = State.NO_TRADE
                     case State.TAKING_POSITION_AND_ORDERS:               
                         self.__calculate_quantity()
-                        if await self.__set_up_orders():
+                        order_error_code = await self.__set_up_orders()
+                        if order_error_code == OrderErrorCode.SUCCESS:
                             self.logger.info("Updating state to TRADE.")
                             self.state = State.TRADE
-                        else:
-                            self.__close_open_positions_and_orders_for_symbol(self.trading_symbol)
+                        elif order_error_code == OrderErrorCode.POSITION_ORDER_FAILED:
+                            self.__close_open_position_for_symbol(self.trading_symbol)
+                            time.sleep(0.5)
+                        elif order_error_code == OrderErrorCode.TAKE_PROFIT_ORDER_FAILED:
+                            self.__close_open_position_for_symbol(self.trading_symbol)
+                            self.__cancel_open_orders_for_symbol(self.trading_symbol)
+                            time.sleep(0.5)
+                        elif order_error_code == OrderErrorCode.STOP_LOSS_ORDER_FAILED:
+                            self.__close_open_position_for_symbol(self.trading_symbol)
+                            self.__cancel_open_orders_for_symbol(self.trading_symbol)
+                            time.sleep(0.5)
+                        elif order_error_code == OrderErrorCode.BOTH_ORDERS_FAILED:
+                            self.__close_open_position_for_symbol(self.trading_symbol)
+                            time.sleep(0.5)
+                        elif order_error_code == OrderErrorCode.UNKNOWN_ERROR:
+                            time.sleep(0.5)
                     case State.TRADE:
                         # Waiting for one of the orders to be filled
                         pass
                     case State.TAKE_PROFIT_ORDER_FILLED:
                         if self.__is_balance_change_limit_reached():
-                            self.__close_open_positions_and_orders_for_symbol(self.trading_symbol)
-                            self.logger.info("Updating state to WAITING_FOR_CANCEL_WHEN_BALANCE_CHANGE_LIMIT_REACHED.")
-                            self.state = State.WAITING_FOR_CANCEL_WHEN_BALANCE_CHANGE_LIMIT_REACHED
+                            self.__cancel_open_orders_for_symbol(self.trading_symbol)
+                            self.logger.info("Updating state to NO_TRADE.")
+                            self.state = State.NO_TRADE
                         else:
-                            self.__close_open_positions_and_orders_for_symbol(self.trading_symbol)
-                            self.logger.info("Updating state to WAITING_FOR_CANCEL_WHEN_BALANCE_CHANGE_LIMIT_NOT_REACHED.")
-                            self.state = State.WAITING_FOR_CANCEL_WHEN_BALANCE_CHANGE_LIMIT_NOT_REACHED
+                            self.__cancel_open_orders_for_symbol(self.trading_symbol)
+                            self.logger.info("Updating state to TAKING_POSITION_AND_ORDERS.")
+                            self.state = State.TAKING_POSITION_AND_ORDERS
                     case State.STOP_MARKET_ORDER_FILLED:
                         if self.__is_balance_change_limit_reached():
-                            self.__close_open_positions_and_orders_for_symbol(self.trading_symbol)
-                            self.logger.info("Updating state to WAITING_FOR_CANCEL_WHEN_BALANCE_CHANGE_LIMIT_REACHED.")
-                            self.state = State.WAITING_FOR_CANCEL_WHEN_BALANCE_CHANGE_LIMIT_REACHED
+                            self.__cancel_open_orders_for_symbol(self.trading_symbol)
+                            self.logger.info("Updating state to NO_TRADE.")
+                            self.state = State.NO_TRADE
                         else:
                             # Reverse the side for the next trade
                             self.__reverse_side()
-                            self.__close_open_positions_and_orders_for_symbol(self.trading_symbol)
-                            self.logger.info("Updating state to WAITING_FOR_CANCEL_WHEN_BALANCE_CHANGE_LIMIT_NOT_REACHED.")
-                            self.state = State.WAITING_FOR_CANCEL_WHEN_BALANCE_CHANGE_LIMIT_NOT_REACHED
-                    case State.WAITING_FOR_CANCEL_WHEN_BALANCE_CHANGE_LIMIT_REACHED:
-                        # Wait for the order to be canceled in __update_order_data_handler
-                        pass
-                    case State.WAITING_FOR_CANCEL_WHEN_BALANCE_CHANGE_LIMIT_NOT_REACHED:
-                        # Wait for the order to be canceled in __update_order_data_handler
-                        pass
-                    case State.ORDER_CANCELED_WHEN_BALANCE_CHANGE_LIMIT_REACHED:
-                        self.logger.info("Updating state to NO_TRADE.")
-                        self.state = State.NO_TRADE
-                    case State.ORDER_CANCELED_WHEN_BALANCE_CHANGE_LIMIT_NOT_REACHED:
-                        self.logger.info("Updating state to TAKING_POSITION.")
-                        self.state = State.TAKING_POSITION_AND_ORDERS
-                    case State.FIRST_ORDER_CANCELED:
-                        self.__close_open_positions_and_orders_for_symbol(self.trading_symbol)
-                        self.logger.info("Updating state to WAITING_FOR_SECOND_ORDER_CANCEL.")
-                        self.state = State.WAITING_FOR_SECOND_ORDER_CANCEL
-                    case State.WAITING_FOR_SECOND_ORDER_CANCEL:
-                        # Wait for the second order to be canceled in __update_order_data_handler
-                        pass
-                    case State.SECOND_ORDER_CANCELED:
-                        self.logger.info("Updating state to TAKING_POSITION.")
-                        self.state = State.TAKING_POSITION_AND_ORDERS
+                            self.__cancel_open_orders_for_symbol(self.trading_symbol)
+                            self.logger.info("Updating state to TAKING_POSITION_AND_ORDERS.")
+                            self.state = State.TAKING_POSITION_AND_ORDERS
                     case State.CONNECTION_LOST:
                         # Waiting until connection is restored
                         pass
                     case State.CONNECTION_RESTORED:
-                        if self.__how_many_orders_are_open(self.trading_symbol) != 2:
-                            self.__close_open_positions_and_orders_for_symbol(self.trading_symbol)
-                            self.logger.info("Updating state to TAKING_POSITION.")
+                        open_orders = self.__what_orders_are_open(self.trading_symbol)
+                        if open_orders != 2:
+                            self.__cancel_open_orders_for_symbol(self.trading_symbol)
+                            self.logger.info("Updating state to TAKING_POSITION_AND_ORDERS.")
                             self.state = State.TAKING_POSITION_AND_ORDERS
                         else:
                             self.logger.info("Updating state to TRADE.")
@@ -362,20 +352,25 @@ class SzalaiStrategy:
             except Exception as e:
                 self.logger.warning(f"Error during OS time sync: {e}")
 
-    def __how_many_orders_are_open(self, symbol: str) -> int:
+    def __what_orders_are_open(self, symbol: str) -> list[OrderResponse]:
         """
-        Get the number of open orders for a symbol.
+        Get all open orders for a symbol.
 
         This method retrieves all open futures orders for the current trading symbol
-        and returns the number of open orders.
+        and returns a list of open orders.
 
         Returns:
-            int: The number of open orders for the trading symbol.
+            list[OrderResponse]: A list of open orders for the trading symbol.
         """
-        self.logger.debug(f"Checking how many open orders are for symbol {symbol}.")
-        symbol_orders = self.client_manager.futures_get_current_all_open_orders(symbol)
-        self.logger.debug(f"Symbol {symbol} has {len(symbol_orders)} open order(s).")
-        return len(symbol_orders)
+        self.logger.debug(f"Checking what orders are open for symbol {symbol}.")
+        # Get all open orders for the symbol from exchange
+        exchange_symbol_orders = self.client_manager.futures_get_current_all_open_orders(symbol)
+        # Get the saved orders from the strategy
+        saved_symbol_orders = [self.trading_symbol_take_profit_order, self.trading_symbol_stop_loss_order]
+        # Filter the saved orders to include only those that are still open
+        open_orders = [order for order in saved_symbol_orders if order.client_order_id in [order["clientOrderId"] for order in exchange_symbol_orders]]
+        self.logger.debug(f"Symbol {symbol} has the following open order(s): {open_orders}.")
+        return open_orders
 
     def __is_balance_change_limit_reached(self) -> bool:
         """
@@ -387,21 +382,21 @@ class SzalaiStrategy:
         """
         # Get the current account balance
         current_account_balance = self.client_manager.futures_get_account_balance(szalai_strategy_config.ACCOUNT_CURRENCY)
-        self.logger.info(f"Current account balance is {round(current_account_balance, 3)}.")
+        self.logger.info(f"Current account balance is {round(current_account_balance, szalai_strategy_config.LOGGING_PRECISION)}.")
         # Calculate the change in account balance
         account_balance_change = current_account_balance / self.start_account_balance
-        self.logger.info(f"Account balance change is {round(account_balance_change * 100, 3)}%.")
+        self.logger.info(f"Account balance change is {round(account_balance_change * 100, szalai_strategy_config.LOGGING_PRECISION)}%.")
         # Calculate the max positive and max negative balance changes
         max_positive_balance_change = 1 + szalai_strategy_config.MAX_POSITIVE_ACCOUNT_BALANCE_CHANGE.decimal_value
         max_negative_balance_change = 1 + szalai_strategy_config.MAX_NEGATIVE_ACCOUNT_BALANCE_CHANGE.decimal_value      
         # Check if the change exceeds the maximum allowed
-        if account_balance_change > max_positive_balance_change:
+        if account_balance_change >= max_positive_balance_change:
             self.logger.info(f"Max positive account balance change of {szalai_strategy_config.MAX_POSITIVE_ACCOUNT_BALANCE_CHANGE} has been reached trading symbol {self.trading_symbol}.")
             self.logger.info(f"A new symbol is to be searched.")
             # Reinitialize the starting balance
             self.start_account_balance = current_account_balance
             return True
-        elif max_negative_balance_change > account_balance_change:
+        elif max_negative_balance_change >= account_balance_change:
             self.logger.info(f"Max negative account balance change of {szalai_strategy_config.MAX_NEGATIVE_ACCOUNT_BALANCE_CHANGE} has been reached trading symbol {self.trading_symbol}.")
             self.logger.info(f"A new symbol is to be searched.")
             # Reinitialize the starting balance
@@ -454,19 +449,27 @@ class SzalaiStrategy:
                         self.logger.error(f"Error processing kline data for {kline_data.symbol}: {e}")
                         continue
 
-    async def __set_up_orders(self) -> bool:
+    async def __set_up_orders(self) -> OrderErrorCode:
         """
         Sets up the initial orders for the trading symbol.
 
         This method creates a market order to buy or sell the trading symbol based on the trading side.
         It also sets up the stop loss and take profit orders for the position.
+
+        Returns:
+            OrderErrorCode: Indicates success or the specific failure point
         """
         self.logger.info(f"Setting up orders for symbol {self.trading_symbol}.")
         # TODO: check if there is enough balance to place the order
         try:
             async with aiohttp.ClientSession() as session:
-                self.trading_symbol_position_order = await self.__create_position_order(self.trading_symbol, self.trading_symbol_quantity, self.side, session)
-                self.order_list.extend([self.trading_symbol_position_order])
+
+                try:
+                    self.trading_symbol_position_order = await self.__create_position_order(self.trading_symbol, self.trading_symbol_quantity, self.side, session)
+                    self.order_list.extend([self.trading_symbol_position_order])
+                except Exception as e:
+                    self.logger.error(f"Error creating position order: {e}")
+                    return OrderErrorCode.POSITION_ORDER_FAILED
 
                 order_results = await asyncio.gather(
                     self.__create_take_profit_order(self.trading_symbol, self.trading_symbol_position_order.average_price, self.side, session),
@@ -474,22 +477,37 @@ class SzalaiStrategy:
                     return_exceptions=True
                 )
 
-                for i, result in enumerate(order_results):
-                    if isinstance(result, Exception):
-                        raise Exception(f"{result}")
+                # Check if orders were created successfully
+                if isinstance(order_results[0], Exception) and isinstance(order_results[1], Exception):
+                    self.logger.error("Both take profit and stop loss orders failed.")
+                    self.logger.error(f"Take profit order creation errror: {order_results[0]}")
+                    self.logger.error(f"Stop loss order creation error: {order_results[1]}")
+                    return OrderErrorCode.BOTH_ORDERS_FAILED
                 
+                if isinstance(order_results[0], Exception):
+                    self.logger.error(f"Take profit order creation failed: {order_results[0]}")
+                    return OrderErrorCode.TAKE_PROFIT_ORDER_FAILED
+                
+                if isinstance(order_results[1], Exception):
+                    self.logger.error(f"Stop loss order creation failed: {order_results[1]}")
+                    return OrderErrorCode.STOP_LOSS_ORDER_FAILED
+
+                # Process the take profit and stop loss order results
+                for i, result in enumerate(order_results):             
+                    # Store the take profit order result
                     if i == 0 and result and isinstance(result, OrderResponse):                    
                         self.trading_symbol_take_profit_order = result
-                        self.order_list.extend([self.trading_symbol_take_profit_order])
-
-                    if i == 1 and result and isinstance(result, OrderResponse):
+                        self.order_list.append(self.trading_symbol_take_profit_order)
+                    # Store the stop loss order result
+                    elif i == 1 and result and isinstance(result, OrderResponse):
                         self.trading_symbol_stop_loss_order = result
-                        self.order_list.extend([self.trading_symbol_stop_loss_order]) 
+                        self.order_list.append(self.trading_symbol_stop_loss_order)
 
-            return True
+            return OrderErrorCode.SUCCESS
+        
         except Exception as e:
             self.logger.error(f"Error setting up orders for symbol {self.trading_symbol}: {e}")
-            return False
+            return OrderErrorCode.UNKNOWN_ERROR
 
     def __calculate_quantity(self) -> None:
         """
@@ -504,8 +522,44 @@ class SzalaiStrategy:
             f"The calculated quantity of symbol {self.trading_symbol_kline_data.symbol} " 
             f"from {szalai_strategy_config.RISK_USD} USD is {self.trading_symbol_quantity}."
         )
+
+    def __close_open_position_for_symbol(self, symbol: str) -> None:
+        """
+        Closes open position for a specified symbol.
+
+        This method creates a market order to close any open position for the given symbol.
+        """
+        self.logger.info(f"Closing all open positions for {symbol}.")
+        position_info = self.client_manager.futures_get_position_information(symbol)
+        position_amount = float(next((x["positionAmt"] for x in position_info), 0))
+
+        if position_amount > 0:
+            sell_market_order = self.client_manager.futures_create_sell_market_order(symbol, position_amount)
+            self.order_list.append(sell_market_order)
+
+        if position_amount < 0:
+            buy_market_order = self.client_manager.futures_create_buy_market_order(symbol, abs(position_amount))
+            self.order_list.append(buy_market_order)
     
-    def __close_open_positions_and_orders_for_symbol(self, symbol: str) -> None:
+    def __cancel_open_orders_for_symbol(self, symbol: str) -> None:
+        """
+        Cancel open orders for a specified symbol.
+
+        This method cancels all open orders for the given symbol.
+        """
+        self.logger.info(f"Cancel all open orders for {symbol}.")
+        self.client_manager.futures_cancel_all_open_orders(symbol)
+
+    def __cancel_open_order_for_symbol(self, symbol: str, order_id: str) -> None:
+        """
+        Cancel an open order for a specified symbol.
+
+        This method cancels an open order for the given symbol.
+        """
+        self.logger.info(f"Cancel order {order_id} for {symbol}.")
+        self.client_manager.futures_cancel_order(symbol, order_id)
+    
+    def __close_open_position_and_cancel_orders_for_symbol(self, symbol: str) -> None:
         """
         Closes all open positions and orders for a specified symbol.
 
@@ -515,35 +569,24 @@ class SzalaiStrategy:
         self.logger.info(f"Closing all open positions and orders for {symbol}.")
         with ThreadPoolExecutor() as executor:
             # Cancel all open orders for the symbol
-            cancel_future = executor.submit(self.client_manager.futures_cancel_all_open_orders, symbol)
+            cancel_future = executor.submit(self.__cancel_open_orders_for_symbol, symbol)
 
-            # Get position information and close any open positions
-            position_info_future = executor.submit(self.client_manager.futures_get_position_information, symbol)
-            position_info_result = position_info_future.result()
-            position_amount = float(next((x["positionAmt"] for x in position_info_result), 0))
-
-            # If the position amount is positive, sell it
-            if position_amount > 0:
-                sell_market_order = self.client_manager.futures_create_sell_market_order(symbol, position_amount)
-                self.order_list.append(sell_market_order)
-
-            # If the position amount is negative, buy it
-            if position_amount < 0:
-                buy_market_order = self.client_manager.futures_create_buy_market_order(symbol, abs(position_amount))
-                self.order_list.append(buy_market_order)
-
-            # Wait for the cancel future to complete
+            # Close any position for the symbol
+            close_future = executor.submit(self.__close_open_position_for_symbol, symbol)
+  
+            # Wait for both tasks to complete
             cancel_future.result()
+            close_future.result()
 
-    def __close_open_positions_and_orders_for_all_symbols(self) -> None:
+    def __close_open_positions_and_cancel_orders_for_all_symbols(self) -> None:
         """
-        Closes all open positions and orders for all symbols.
+        Closes open positions and cancels all orders for all symbols.
 
         This method iterates through each trading symbol and:
         - Cancels all open orders
         - Closes any remaining positions by creating market orders
         """
-        self.logger.info("Closing all open positions and orders for all symbols.")
+        self.logger.info("Closing open positions and cancel orders for all symbols.")
         with ThreadPoolExecutor(max_workers=len(szalai_strategy_config.TRADE_SYMBOLS) * 2) as executor:
 
             # Cancel all open orders for all symbols concurrently
@@ -582,13 +625,13 @@ class SzalaiStrategy:
         event_type = message.get("e")
         client_order_id = message.get("o", {}).get("c", None)
 
-        with self.state_lock:
-            if event_type == "ORDER_TRADE_UPDATE" and any(order.client_order_id == client_order_id for order in self.order_list):
-                status = message.get("o", {}).get("X", None)
-                order = next(order for order in self.order_list if order.client_order_id == client_order_id)
-                order.status = status
-                self.logger.debug(f"Order has been updated, {order}.")
-
+        if event_type == "ORDER_TRADE_UPDATE" and any(order.client_order_id == client_order_id for order in self.order_list):
+            status = message.get("o", {}).get("X", None)
+            order = next(order for order in self.order_list if order.client_order_id == client_order_id)
+            order.status = status
+            self.logger.debug(f"Order has been updated, {order}.")
+            
+            with self.state_lock:
                 if order.type == "TAKE_PROFIT_MARKET" and order.status == "FILLED":
                     self.logger.info(f"{order.type} order has been filled.")
                     self.logger.info(f"Updating state to TAKE_PROFIT_ORDER_FILLED.")
@@ -602,42 +645,7 @@ class SzalaiStrategy:
                     return
 
                 if (order.type in ["STOP_MARKET", "TAKE_PROFIT_MARKET"]) and order.status == "CANCELED":
-                    self.logger.info(f"{order.type} order has been canceled.")
-                    self.__handle_canceled_order(order)
-
-    def __handle_canceled_order(self, order: OrderResponse) -> None:
-        """
-        Handles state transitions when an order is canceled.
-        
-        This method determines the appropriate state transition based on the current state
-        when a STOP_MARKET or TAKE_PROFIT_MARKET order is canceled.
-        
-        Args:
-            order: The canceled order
-        """
-        if (self.state == State.TAKE_PROFIT_ORDER_FILLED 
-            or self.state == State.STOP_MARKET_ORDER_FILLED 
-            or self.state == State.NO_TRADE 
-            or self.state == State.STOPPED):
-            return
-    
-        if self.state == State.WAITING_FOR_CANCEL_WHEN_BALANCE_CHANGE_LIMIT_REACHED:
-            self.logger.info("Updating state to ORDER_CANCELED_WHEN_BALANCE_CHANGE_LIMIT_REACHED.")
-            self.state = State.ORDER_CANCELED_WHEN_BALANCE_CHANGE_LIMIT_REACHED
-            return
-    
-        if self.state == State.WAITING_FOR_CANCEL_WHEN_BALANCE_CHANGE_LIMIT_NOT_REACHED:
-            self.logger.info("Updating state to ORDER_CANCELED_WHEN_BALANCE_CHANGE_LIMIT_NOT_REACHED.")
-            self.state = State.ORDER_CANCELED_WHEN_BALANCE_CHANGE_LIMIT_NOT_REACHED
-            return
-    
-        if self.state == State.WAITING_FOR_SECOND_ORDER_CANCEL:
-            self.logger.info("Updating state to SECOND_ORDER_CANCELED.")
-            self.state = State.SECOND_ORDER_CANCELED
-            return
-        
-        self.logger.info("Updating state to FIRST_ORDER_CANCELED.")
-        self.state = State.FIRST_ORDER_CANCELED
+                    self.logger.debug(f"{order.type} order has been canceled.")
 
     async def __create_position_order(self, symbol: str, quantity: float, side: Side, session: aiohttp.ClientSession) -> OrderResponse:
         """
@@ -682,14 +690,14 @@ class SzalaiStrategy:
             return await self.client_manager.async_futures_create_buy_stop_market_order(symbol, sl_price, session)
 
     def __get_most_volatile_symbol(self) -> None:
-        """
+        """ 
         Retrieves the most volatile symbol from the kline data list.
 
         This method determines the most volatile symbol based on the highest price change.
         """
         self.trading_symbol_kline_data = max(self.kline_data_list, key=lambda x: x.change)
         self.trading_symbol = self.trading_symbol_kline_data.symbol
-        self.logger.info(f"Most volatile symbol is {self.trading_symbol_kline_data.symbol}, change is {round(self.trading_symbol_kline_data.percentage_change, 3)}%.")
+        self.logger.info(f"Most volatile symbol is {self.trading_symbol_kline_data.symbol}, change is {round(self.trading_symbol_kline_data.percentage_change, szalai_strategy_config.LOGGING_PRECISION)}%.")
 
 
     def __calculate_take_profit_price(self, price: float, side: Side) -> float:
@@ -701,9 +709,9 @@ class SzalaiStrategy:
         """
         self.logger.debug(f"Calculating take profit price, price: {price}, side: {side.name}.")
         if side == Side.LONG:
-            tp_price = price * (1 + szalai_strategy_config.TAKE_PROFIT_MULTIPLIER.decimal_value)
+            tp_price = price + (price * szalai_strategy_config.TAKE_PROFIT_MULTIPLIER.decimal_value)
         else:
-            tp_price = price * (1 - szalai_strategy_config.TAKE_PROFIT_MULTIPLIER.decimal_value)
+            tp_price = price - (price * szalai_strategy_config.TAKE_PROFIT_MULTIPLIER.decimal_value)
         self.logger.debug(f"Take profit price is {tp_price}.")
         return tp_price
 
@@ -716,9 +724,9 @@ class SzalaiStrategy:
         """
         self.logger.debug(f"Calculating stop loss price, price: {price}, side: {side.name}.")
         if side == Side.LONG:
-            sl_price = price * (1 - szalai_strategy_config.STOP_LOSS_MULTIPLIER.decimal_value)
+            sl_price = price - (price * szalai_strategy_config.STOP_LOSS_MULTIPLIER.decimal_value)
         else:
-            sl_price = price * (1 + szalai_strategy_config.STOP_LOSS_MULTIPLIER.decimal_value)
+            sl_price = price + (price * szalai_strategy_config.STOP_LOSS_MULTIPLIER.decimal_value)
         self.logger.debug(f"Stop loss price is {sl_price}.")
         return sl_price
 

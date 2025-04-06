@@ -5,6 +5,7 @@ from datetime import datetime
 from logging import Logger
 from binance import Client
 from binance import enums
+from requests import Session
 from configs import binance_config
 from models.order_response import OrderResponse
 
@@ -276,6 +277,20 @@ class BinanceClientManager():
             datetime.fromtimestamp(response["updateTime"]/1000)
         )
         return order_response
+    
+    def futures_cancel_order(self, symbol: str, order_id: str) -> dict:
+        """Cancels a specific futures order.
+
+        Args:
+            symbol (str): Trading symbol.
+            order_id (str): Order ID to cancel.
+
+        Returns:
+            dict: Response from the cancel order request.
+        """
+        response = self.client.futures_cancel_order(symbol=symbol, origClientOrderId=order_id)
+        self.logger.debug(f"Order {order_id} for symbol {symbol} has been cancelled.")
+        return response
     
     def futures_cancel_all_open_orders(self, symbol: str) -> dict:
         """Cancels all open futures orders for a given symbol.
