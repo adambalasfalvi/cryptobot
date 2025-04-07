@@ -9,8 +9,8 @@ TRADE_SYMBOLS = [ "BTCUSDT" ]
 # Currency of the account being used for trading
 ACCOUNT_CURRENCY = "USDT"
 
-# Interval of the candlestick (kline) data, here set to 1 minute
-BAR_INTERVAL = "1m"
+# Interval of the candlestick (kline) data (1m, 3m, 5m, 15m, 30m, 1h, 2h, 4h, 6h, 8h, 12h, 1d, 3d, 1w)
+BAR_INTERVAL = "1w"
 
 # Minimum percentage change in price to consider for volatility calculations
 MIN_CHANGE = Percentage(0.001)

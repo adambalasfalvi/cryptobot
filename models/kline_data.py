@@ -7,7 +7,7 @@ class KlineData:
 
     Attributes:
         symbol (str): The trading symbol (e.g., 'BTCUSDT').
-        interval (timedelta): The interval of the k-line data (e.g., 1m, 1h).
+        interval (str): The interval of the k-line data (e.g., 1m, 1h).
         open_price (float): The opening price of the k-line.
         close_price (float): The closing price of the k-line.
         high_price (float): The highest price of the k-line.
@@ -17,7 +17,7 @@ class KlineData:
     """
     
     def __init__(self, symbol: str, 
-                 interval: timedelta, 
+                 interval: str, 
                  open_price: float, 
                  close_price: float, 
                  high_price: float, 
@@ -29,7 +29,7 @@ class KlineData:
 
         Args:
             symbol (str): The trading symbol.
-            interval (timedelta): The interval of the k-line data.
+            interval (str): The interval of the k-line data.
             open_price (float): The opening price of the k-line.
             close_price (float): The closing price of the k-line.
             high_price (float): The highest price of the k-line.
@@ -51,7 +51,7 @@ class KlineData:
         """
         Creates an instance of KlineData with only the symbol specified.
         """
-        return cls(symbol, timedelta(0), 0.0, 0.0, 0.0, 0.0, datetime.min, datetime.min)
+        return cls(symbol, str(), 0.0, 0.0, 0.0, 0.0, datetime.min, datetime.min)
 
     @property
     def change(self) -> float:

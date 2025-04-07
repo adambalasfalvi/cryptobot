@@ -1,3 +1,4 @@
+from math import ceil
 import sys
 import logging
 import logging.handlers
@@ -8,7 +9,6 @@ import aiohttp
 from datetime import datetime
 from logging import Logger
 from concurrent.futures import ThreadPoolExecutor
-from models import order_error_code
 from models.order_error_code import OrderErrorCode
 from models.order_response import OrderResponse
 from models.side import Side
@@ -266,18 +266,6 @@ class SzalaiStrategy:
                         symbol_precision_info["quotePrecision"]
                     )
                 )
-
-    def __calculate_trigger_time(self, server_time: datetime) -> datetime:
-        """Calculate the next trigger time based on the interval."""
-        if self.interval == Interval.ONE_MONTH:
-            next_trigger = server_time.replace(day=1) + self.interval.timedelta
-            next_trigger = next_trigger.replace(day=1)
-        else:
-            next_trigger = server_time + self.interval.timedelta
-
-        next_trigger = next_trigger.replace(second=0, microsecond=0)
-        self.logger.info(f"Next trigger is set to {next_trigger}.")
-        return next_trigger
     
     def __set_interval_trigger(self) -> None:
         """
@@ -323,6 +311,11 @@ class SzalaiStrategy:
                         self.logger.info("Updating state to CONNECTION_LOST.")
                         self.state = State.CONNECTION_LOST
                 time.sleep(szalai_strategy_config.RETRY_INTERVAL)
+
+    def __calculate_trigger_time(self, server_time: datetime) -> datetime:
+        next_trigger = self.interval.get_trigger_time(server_time)
+        self.logger.info(f"Next trigger is set to {next_trigger}.")
+        return next_trigger
 
     def __sync_os_time(self) -> None:
         """
@@ -438,7 +431,7 @@ class SzalaiStrategy:
 
                 if current_kline_data and isinstance(current_kline_data, list) and len(current_kline_data) > 0:
                     try:
-                        kline_data.interval = self.interval.timedelta
+                        kline_data.interval = self.interval.__str__()
                         kline_data.open_price = float(current_kline_data[0][1])
                         kline_data.high_price = float(current_kline_data[0][2])
                         kline_data.low_price = float(current_kline_data[0][3])
