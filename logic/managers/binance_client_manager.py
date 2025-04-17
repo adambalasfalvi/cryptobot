@@ -368,18 +368,25 @@ class BinanceClientManager():
         self.logger.debug(f"Latest price for {symbol} is {latest_price}.")
         return latest_price
     
-    async def async_futures_get_kline_data(self, symbol: str, interval: str, limit: int, session: aiohttp.ClientSession) -> str:
-        """Retrieves kline (candlestick) data for a specific symbol.
+    async def async_futures_get_kline_data(self, symbol: str, interval: str, limit: int, session: aiohttp.ClientSession) -> list:
+        """Asynchronously retrieves kline (candlestick) data for a specific symbol.
 
-        Parameters:
-            symbol (str): The trading pair or symbol (e.g., 'BTCUSDT') for which data is being requested.
-            interval (str): The time interval for each kline (e.g., 1m, 1h).
-            limit (int): The maximum number of klines to retrieve in a single request.
+        Args:
+            symbol (str): Trading symbol (e.g., 'BTCUSDT').
+            interval (str): Time interval for each kline (e.g., '1m', '1h', '1d').
+            limit (int): Maximum number of klines to retrieve.
+            session (aiohttp.ClientSession): Active aiohttp client session for making requests.
 
         Returns:
-            str: The requested kline data.
+            list: List of kline data where each kline is a list containing open time, open price,
+                 high price, low price, close price, volume, etc.
+
+        Raises:
+            Exception: If the API request fails.
         """
+        # Set the URL for the kline data endpoint
         url = f"{binance_config.BASE_URL}/fapi/v1/klines?symbol={symbol}&interval={interval}&limit={limit}"
+
         self.logger.debug(f"Getting kline data for {symbol} symbol, interval: {interval}, limit: {limit}, url: {url}.")
         
         async with session.get(url) as response:

@@ -10,7 +10,7 @@ TRADE_SYMBOLS = [ "BTCUSDT" ]
 ACCOUNT_CURRENCY = "USDT"
 
 # Interval of the candlestick (kline) data (1m, 3m, 5m, 15m, 30m, 1h, 2h, 4h, 6h, 8h, 12h, 1d, 3d, 1w)
-BAR_INTERVAL = "1w"
+BAR_INTERVAL = "1m"
 
 # Minimum percentage change in price to consider for volatility calculations
 MIN_CHANGE = Percentage(0.001)
@@ -25,7 +25,7 @@ MAX_NEGATIVE_ACCOUNT_BALANCE_CHANGE = Percentage(-5)
 RISK_USD = 150
 
 # Leverage to be used in futures trading
-LEVERAGE = 1
+LEVERAGE = 10
 
 # Multiplier for calculating stop loss price in percentage
 STOP_LOSS_MULTIPLIER = Percentage(1)
@@ -37,4 +37,10 @@ TAKE_PROFIT_MULTIPLIER = Percentage(1)
 RETRY_INTERVAL = 5
 
 # Logging precision for displaying floating-point numbers
-LOGGING_PRECISION = 3
+LOGGING_PRECISION = 4
+
+# Trigger time offset in milliseconds for the strategy
+TRIGGER_TIME_OFFSET = 500
+
+# Enable or disable logging of kline data
+LOG_KLINE_DATA = True

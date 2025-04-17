@@ -313,7 +313,17 @@ class SzalaiStrategy:
                 time.sleep(szalai_strategy_config.RETRY_INTERVAL)
 
     def __calculate_trigger_time(self, server_time: datetime) -> datetime:
-        next_trigger = self.interval.get_trigger_time(server_time)
+        """
+        Calculate the next trigger time based on the current interval and server time.
+        
+        Args:
+            server_time (datetime): The current server time
+            
+        Returns:
+            datetime: The next trigger time with the configured offset applied
+        """
+        offset_ms = szalai_strategy_config.TRIGGER_TIME_OFFSET
+        next_trigger = self.interval.get_trigger_time(server_time, offset_ms)
         self.logger.info(f"Next trigger is set to {next_trigger}.")
         return next_trigger
 
@@ -401,7 +411,7 @@ class SzalaiStrategy:
 
     def __check_change_rate(self) -> bool:
         # Check if the volatility change exceeds the minimum threshold
-        if self.trading_symbol_kline_data.change >= szalai_strategy_config.MIN_CHANGE.decimal_value:
+        if abs(self.trading_symbol_kline_data.change) >= szalai_strategy_config.MIN_CHANGE.decimal_value:
             self.logger.info(f"The symbol {self.trading_symbol} has reached the preset minimal change of {szalai_strategy_config.MIN_CHANGE.percent_value}%.")
             return True
         else:
@@ -438,6 +448,23 @@ class SzalaiStrategy:
                         kline_data.close_price = float(current_kline_data[0][4])
                         kline_data.open_time = datetime.fromtimestamp(int(current_kline_data[0][0]) / 1000)
                         kline_data.close_time = datetime.fromtimestamp(int(current_kline_data[0][6]) / 1000)
+
+                        # Log the kline data if kline data logging is enabled
+                        if szalai_strategy_config.LOG_KLINE_DATA:
+                            self.logger.kline_data( # type: ignore
+                                f"Symbol: {kline_data.symbol}, "
+                                f"Interval: {kline_data.interval}, "
+                                f"Open Time: {kline_data.open_time}, "
+                                f"Close Time: {kline_data.close_time}, "
+                                f"Open: {round(kline_data.open_price, szalai_strategy_config.LOGGING_PRECISION)}, "
+                                f"High: {round(kline_data.high_price, szalai_strategy_config.LOGGING_PRECISION)}, "
+                                f"Low: {round(kline_data.low_price, szalai_strategy_config.LOGGING_PRECISION)}, "
+                                f"Close: {round(kline_data.close_price, szalai_strategy_config.LOGGING_PRECISION)}, "
+                                f"Change: {round(kline_data.change, szalai_strategy_config.LOGGING_PRECISION)}, "
+                                f"Percentage Change: {round(kline_data.percentage_change, szalai_strategy_config.LOGGING_PRECISION)}%, "
+                                f"Raw Data: {current_kline_data}"
+                            )
+
                     except (IndexError, ValueError, TypeError) as e:
                         self.logger.error(f"Error processing kline data for {kline_data.symbol}: {e}")
                         continue
@@ -688,7 +715,7 @@ class SzalaiStrategy:
 
         This method determines the most volatile symbol based on the highest price change.
         """
-        self.trading_symbol_kline_data = max(self.kline_data_list, key=lambda x: x.change)
+        self.trading_symbol_kline_data = max(self.kline_data_list, key=lambda x: abs(x.change))
         self.trading_symbol = self.trading_symbol_kline_data.symbol
         self.logger.info(f"Most volatile symbol is {self.trading_symbol_kline_data.symbol}, change is {round(self.trading_symbol_kline_data.percentage_change, szalai_strategy_config.LOGGING_PRECISION)}%.")
 
@@ -730,6 +757,20 @@ class SzalaiStrategy:
         This method sets up the logger with different handlers for console output and file
         logging. It includes separate files for informational and debug logging.
         """
+
+        # Define custom log level for kline data
+        KLINE_DATA = 15  # Between DEBUG (10) and INFO (20)
+        logging.addLevelName(KLINE_DATA, "KLINE_DATA")
+        
+        # Create a method for the custom level
+        def kline_data(self, message, *args, **kwargs):
+            """Log kline data events at custom level between DEBUG and INFO"""
+            if self.isEnabledFor(KLINE_DATA):
+                self._log(KLINE_DATA, message, args, **kwargs)
+        
+        # Add the method to the Logger class
+        setattr(logging.Logger, 'kline_data', kline_data)
+
         logger = logging.getLogger(__name__)
         logger.setLevel(logging.DEBUG)
 
@@ -752,5 +793,19 @@ class SzalaiStrategy:
         file_debug_handler.setFormatter(logging.Formatter("[%(asctime)s, %(threadName)s, %(funcName)s, %(levelname)s] %(message)s"))
         file_debug_handler.setLevel(logging.DEBUG)
         logger.addHandler(file_debug_handler)
+
+        # File handler for kline data logs
+        file_kline_data_name = f"szalai_strategy_kline_data_{datetime.now().strftime('%Y%m%d_%H%M')}.log"
+        file_kline_data_handler = logging.FileHandler(filename=file_kline_data_name)
+        file_kline_data_handler.setFormatter(logging.Formatter("[%(asctime)s, %(threadName)s, %(funcName)s, %(levelname)s] %(message)s"))
+        file_kline_data_handler.setLevel(KLINE_DATA)
+
+        # Add a filter to only include KLINE_DATA level messages
+        class KlineDataFilter(logging.Filter):
+            def filter(self, record):
+                return record.levelno == KLINE_DATA  # Only log messages exactly at KLINE_DATA level
+
+        file_kline_data_handler.addFilter(KlineDataFilter())
+        logger.addHandler(file_kline_data_handler)
 
         return logger

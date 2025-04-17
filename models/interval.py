@@ -43,7 +43,7 @@ class Interval(Enum):
     ONE_WEEK = "1w"
     ONE_MONTH = "1M"
 
-    def get_trigger_time(self, server_time: datetime) -> datetime:
+    def get_trigger_time(self, server_time: datetime, offset_ms: int = 0) -> datetime:
         """
         Calculates the next trigger time for the given interval based on server time.
         
@@ -56,9 +56,10 @@ class Interval(Enum):
         
         Args:
             server_time (datetime): Current server time to calculate from
+            offset_ms (int): Optional offset in milliseconds to add to the trigger time
             
         Returns:
-            datetime: The next trigger time for this interval
+            datetime: The next trigger time for this interval with the applied offset
         """
         # First check if it's DST (summer time) or not (winter time)
         # This uses the server_time's tzinfo to determine DST status
@@ -67,9 +68,12 @@ class Interval(Enum):
         is_dst = dst_value is not None and dst_value.total_seconds() > 0 if server_time.tzinfo else True
         base_hour = 2 if is_dst else 1  # 2AM for summer, 1AM for winter
         
+        # Calculate the base trigger time without the offset
+        trigger_time = None
+        
         # Short intervals aligned to regular clock boundaries
         if self == Interval.ONE_MINUTE:
-            return server_time.replace(second=0, microsecond=0) + timedelta(minutes=1)
+            trigger_time = server_time.replace(second=0, microsecond=0) + timedelta(minutes=1)
         elif self == Interval.THREE_MINUTES:
             minute = server_time.minute
             # Get the next 3-minute boundary (0, 3, 6, 9, 12, etc.)
@@ -77,9 +81,10 @@ class Interval(Enum):
             if next_minute == minute and server_time.second > 0:
                 next_minute += 3
             if next_minute >= 60:
-                return (server_time.replace(minute=0, second=0, microsecond=0) + 
-                        timedelta(hours=1, minutes=next_minute-60))
-            return server_time.replace(minute=next_minute, second=0, microsecond=0)
+                trigger_time = (server_time.replace(minute=0, second=0, microsecond=0) + 
+                                timedelta(hours=1, minutes=next_minute-60))
+            else:
+                trigger_time = server_time.replace(minute=next_minute, second=0, microsecond=0)
         elif self == Interval.FIVE_MINUTES:
             minute = server_time.minute
             # Get the next 5-minute boundary (0, 5, 10, 15, etc.)
@@ -87,9 +92,10 @@ class Interval(Enum):
             if next_minute == minute and server_time.second > 0:
                 next_minute += 5
             if next_minute >= 60:
-                return (server_time.replace(minute=0, second=0, microsecond=0) + 
-                        timedelta(hours=1, minutes=next_minute-60))
-            return server_time.replace(minute=next_minute, second=0, microsecond=0)
+                trigger_time = (server_time.replace(minute=0, second=0, microsecond=0) + 
+                                timedelta(hours=1, minutes=next_minute-60))
+            else:
+                trigger_time = server_time.replace(minute=next_minute, second=0, microsecond=0)
         elif self == Interval.FIFTEEN_MINUTES:
             minute = server_time.minute
             # Get the next 15-minute boundary (0, 15, 30, 45)
@@ -97,9 +103,10 @@ class Interval(Enum):
             if next_minute == minute and server_time.second > 0:
                 next_minute += 15
             if next_minute >= 60:
-                return (server_time.replace(minute=0, second=0, microsecond=0) + 
-                        timedelta(hours=1, minutes=next_minute-60))
-            return server_time.replace(minute=next_minute, second=0, microsecond=0)
+                trigger_time = (server_time.replace(minute=0, second=0, microsecond=0) + 
+                                timedelta(hours=1, minutes=next_minute-60))
+            else:
+                trigger_time = server_time.replace(minute=next_minute, second=0, microsecond=0)
         elif self == Interval.THIRTY_MINUTES:
             minute = server_time.minute
             # Get the next 30-minute boundary (0, 30)
@@ -107,22 +114,25 @@ class Interval(Enum):
             if next_minute == minute and server_time.second > 0:
                 next_minute += 30
             if next_minute >= 60:
-                return (server_time.replace(minute=0, second=0, microsecond=0) + 
-                        timedelta(hours=1, minutes=next_minute-60))
-            return server_time.replace(minute=next_minute, second=0, microsecond=0)
+                trigger_time = (server_time.replace(minute=0, second=0, microsecond=0) + 
+                                timedelta(hours=1, minutes=next_minute-60))
+            else:
+                trigger_time = server_time.replace(minute=next_minute, second=0, microsecond=0)
         elif self == Interval.ONE_HOUR:
             if server_time.minute > 0 or server_time.second > 0:
-                return server_time.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
-            return server_time.replace(minute=0, second=0, microsecond=0)
+                trigger_time = server_time.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+            else:
+                trigger_time = server_time.replace(minute=0, second=0, microsecond=0)
         elif self == Interval.TWO_HOURS:
             hour = server_time.hour
             next_hour = ceil(hour / 2) * 2
             if next_hour == hour and (server_time.minute > 0 or server_time.second > 0):
                 next_hour += 2
             if next_hour >= 24:
-                return (server_time.replace(hour=0, minute=0, second=0, microsecond=0) + 
-                        timedelta(days=1, hours=next_hour-24))
-            return server_time.replace(hour=next_hour, minute=0, second=0, microsecond=0)
+                trigger_time = (server_time.replace(hour=0, minute=0, second=0, microsecond=0) + 
+                                timedelta(days=1, hours=next_hour-24))
+            else:
+                trigger_time = server_time.replace(hour=next_hour, minute=0, second=0, microsecond=0)
         
         # For 4h, 6h, 8h, 12h, 1d, 3d, 1w intervals, we use the base hour (02:00/01:00)
         current = server_time.replace(minute=0, second=0, microsecond=0)
@@ -140,7 +150,7 @@ class Interval(Enum):
             target = current.replace(hour=target_hour)
             if target <= current:
                 target += timedelta(days=days_ahead)
-            return target
+            trigger_time = target
         
         elif self == Interval.SIX_HOURS:
             # Find next 6-hour interval from base hour (02:00/01:00)
@@ -155,7 +165,7 @@ class Interval(Enum):
             target = current.replace(hour=target_hour)
             if target <= current:
                 target += timedelta(days=days_ahead)
-            return target
+            trigger_time = target
         
         elif self == Interval.EIGHT_HOURS:
             # Find next 8-hour interval from base hour (02:00/01:00)
@@ -170,7 +180,7 @@ class Interval(Enum):
             target = current.replace(hour=target_hour)
             if target <= current:
                 target += timedelta(days=days_ahead)
-            return target
+            trigger_time = target
         
         elif self == Interval.TWELVE_HOURS:
             # Find next 12-hour interval from base hour (02:00/01:00)
@@ -185,14 +195,15 @@ class Interval(Enum):
             target = current.replace(hour=target_hour)
             if target <= current:
                 target += timedelta(days=days_ahead)
-            return target
+            trigger_time = target
         
         elif self == Interval.ONE_DAY:
             # Base time 02:00/01:00 every day
             if current.hour > base_hour or (current.hour == base_hour and (server_time.minute > 0 or server_time.second > 0)):
-                return (current.replace(hour=base_hour, minute=0, second=0, microsecond=0) + 
-                        timedelta(days=1))
-            return current.replace(hour=base_hour, minute=0, second=0, microsecond=0)
+                trigger_time = (current.replace(hour=base_hour, minute=0, second=0, microsecond=0) + 
+                                timedelta(days=1))
+            else:
+                trigger_time = current.replace(hour=base_hour, minute=0, second=0, microsecond=0)
         
         elif self == Interval.THREE_DAYS:
             # Get the 2023-01-01 date with the base hour
@@ -211,10 +222,10 @@ class Interval(Enum):
                     (current - period_start).days == 2 and 
                     (current.hour > base_hour or 
                         (current.hour == base_hour and (server_time.minute > 0 or server_time.second > 0)))):
-                return period_start + timedelta(days=3)
-            
-            # Otherwise, return the base hour on the 3rd day of the current period
-            return period_start + timedelta(days=2)
+                trigger_time = period_start + timedelta(days=3)
+            else:
+                # Otherwise, return the base hour on the 3rd day of the current period
+                trigger_time = period_start + timedelta(days=2)
         
         elif self == Interval.ONE_WEEK:
             # Base time 02:00/01:00 on weekly boundaries (assuming Monday is start of week)
@@ -225,11 +236,20 @@ class Interval(Enum):
             
             if current.hour > base_hour or (current.hour == base_hour and (server_time.minute > 0 or server_time.second > 0)):
                 if today == 0:  # If it's Monday after base hour
-                    return next_week
-            return next_week
+                    trigger_time = next_week
+            else:
+                trigger_time = next_week
         
         # Default case if interval is not recognized is one minute
-        return server_time.replace(second=0, microsecond=0) + timedelta(minutes=1)
+        if trigger_time is None:
+            trigger_time = server_time.replace(second=0, microsecond=0) + timedelta(minutes=1)
+        
+        # Apply the offset in milliseconds
+        if offset_ms != 0 and trigger_time is not None:
+            offset_microseconds = offset_ms * 1000  # Convert ms to microseconds
+            trigger_time += timedelta(microseconds=offset_microseconds)
+            
+        return trigger_time
     
     def __str__(self) -> str:
         """
