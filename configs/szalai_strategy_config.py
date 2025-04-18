@@ -40,7 +40,7 @@ RETRY_INTERVAL = 5
 LOGGING_PRECISION = 4
 
 # Trigger time offset in milliseconds for the strategy
-TRIGGER_TIME_OFFSET = 500
+TRIGGER_TIME_OFFSET = 700
 
 # Enable or disable logging of kline data
 LOG_KLINE_DATA = True

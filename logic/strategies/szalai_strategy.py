@@ -383,24 +383,30 @@ class SzalaiStrategy:
         the maximum allowable positive or negative change has been exceeded. If so, it reinitializes
         the starting balance and returns True to indicate that the limit has been reached.
         """
+        # Log the starting balance
+        self.logger.info(f"Start account balance: {round(self.start_account_balance, szalai_strategy_config.LOGGING_PRECISION)}.")
+
         # Get the current account balance
         current_account_balance = self.client_manager.futures_get_account_balance(szalai_strategy_config.ACCOUNT_CURRENCY)
-        self.logger.info(f"Current account balance is {round(current_account_balance, szalai_strategy_config.LOGGING_PRECISION)}.")
-        # Calculate the change in account balance
-        account_balance_change = current_account_balance / self.start_account_balance
-        self.logger.info(f"Account balance change is {round(account_balance_change * 100, szalai_strategy_config.LOGGING_PRECISION)}%.")
-        # Calculate the max positive and max negative balance changes
-        max_positive_balance_change = 1 + szalai_strategy_config.MAX_POSITIVE_ACCOUNT_BALANCE_CHANGE.decimal_value
-        max_negative_balance_change = 1 + szalai_strategy_config.MAX_NEGATIVE_ACCOUNT_BALANCE_CHANGE.decimal_value      
-        # Check if the change exceeds the maximum allowed
-        if account_balance_change >= max_positive_balance_change:
-            self.logger.info(f"Max positive account balance change of {szalai_strategy_config.MAX_POSITIVE_ACCOUNT_BALANCE_CHANGE} has been reached trading symbol {self.trading_symbol}.")
+        self.logger.info(f"Current account balance: {round(current_account_balance, szalai_strategy_config.LOGGING_PRECISION)}.")
+
+        # Calculate the percentage change in account balance
+        balance_change_percentage = ((current_account_balance - self.start_account_balance) / self.start_account_balance) * 100
+        self.logger.info(f"Account balance change: {round(balance_change_percentage, szalai_strategy_config.LOGGING_PRECISION)}%.")
+
+        # Define the upper and lower balance change limits
+        upper_balance_limit = szalai_strategy_config.MAX_POSITIVE_ACCOUNT_BALANCE_CHANGE.percent_value
+        lower_balance_limit = szalai_strategy_config.MAX_NEGATIVE_ACCOUNT_BALANCE_CHANGE.percent_value
+
+        # Check if the balance change exceeds the allowed limits
+        if balance_change_percentage >= upper_balance_limit:
+            self.logger.info(f"Max positive account balance change of {szalai_strategy_config.MAX_POSITIVE_ACCOUNT_BALANCE_CHANGE} has been reached by {self.trading_symbol} symbol.")
             self.logger.info(f"A new symbol is to be searched.")
             # Reinitialize the starting balance
             self.start_account_balance = current_account_balance
             return True
-        elif max_negative_balance_change >= account_balance_change:
-            self.logger.info(f"Max negative account balance change of {szalai_strategy_config.MAX_NEGATIVE_ACCOUNT_BALANCE_CHANGE} has been reached trading symbol {self.trading_symbol}.")
+        elif balance_change_percentage <= lower_balance_limit:
+            self.logger.info(f"Max negative account balance change of {szalai_strategy_config.MAX_NEGATIVE_ACCOUNT_BALANCE_CHANGE} has been reached by {self.trading_symbol} symbol.")
             self.logger.info(f"A new symbol is to be searched.")
             # Reinitialize the starting balance
             self.start_account_balance = current_account_balance
