@@ -56,12 +56,18 @@ class KlineData:
     @property
     def change(self) -> float:
         """
-        Calculates the price change of the k-line.
-
+        Calculates the relative price change of the k-line.
+    
         Returns:
-            float: The change of price change.
-            0.0: If open_price or close_price is None.
+            float: The relative price change as a decimal (e.g., 0.05 for 5% increase).
+            0.0: If open_price or close_price is None or open_price is 0.0.
         """
+        if self.open_price is None or self.close_price is None:
+            return 0.0
+            
+        if self.open_price == 0.0:
+            return 0.0
+    
         return (self.close_price - self.open_price) / self.open_price
     
     @property
