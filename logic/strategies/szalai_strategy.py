@@ -417,7 +417,7 @@ class SzalaiStrategy:
 
     def _check_change_rate(self) -> bool:
         # Check if the volatility change exceeds the minimum threshold
-        if abs(self.trading_symbol_kline_data.change) >= szalai_strategy_config.MIN_CHANGE.decimal_value:
+        if abs(self.trading_symbol_kline_data.percentage_change) >= szalai_strategy_config.MIN_CHANGE.percent_value:
             self.logger.info(f"The symbol {self.trading_symbol} has reached the preset minimal change of {szalai_strategy_config.MIN_CHANGE.percent_value}%.")
             return True
         else:
@@ -428,10 +428,21 @@ class SzalaiStrategy:
         """
         Gets the current kline data for all symbols listed in szalai_strategy_config concurrently.
         """
+        # Calculate end time as current time rounded to the nearest minute
+        end_time = datetime.now()
+        end_time = end_time.replace(microsecond=0, second=0)
+        
+        # Calculate start time based on the interval's timedelta
+        # This uses the timedelta property from the Interval enum, which correctly represents
+        # the time difference for each interval type
+        start_time = end_time - self.interval.timedelta
+        
+        self.logger.debug(f"Fetching kline data with start time: {start_time}, end time: {end_time}")
+
         async with aiohttp.ClientSession() as session:
             tasks = [
                 self.client_manager.async_futures_get_kline_data(
-                    kline_data.symbol, self.interval.__str__(), 1, session
+                    kline_data.symbol, self.interval.__str__(), 1, session, start_time, end_time
                 ) 
                 for kline_data in self.kline_data_list
             ]

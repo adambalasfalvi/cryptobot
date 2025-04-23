@@ -43,6 +43,45 @@ class Interval(Enum):
     ONE_WEEK = "1w"
     ONE_MONTH = "1M"
 
+    @property
+    def timedelta(self) -> timedelta:
+        """
+        Returns the timedelta object corresponding to the interval.
+
+        Returns:
+            timedelta: The timedelta object representing the interval.
+        """
+        if self == Interval.ONE_MINUTE:
+            return timedelta(minutes=1)
+        elif self == Interval.THREE_MINUTES:
+            return timedelta(minutes=3)
+        elif self == Interval.FIVE_MINUTES:
+            return timedelta(minutes=5)
+        elif self == Interval.FIFTEEN_MINUTES:
+            return timedelta(minutes=15)
+        elif self == Interval.THIRTY_MINUTES:
+            return timedelta(minutes=30)
+        elif self == Interval.ONE_HOUR:
+            return timedelta(hours=1)
+        elif self == Interval.TWO_HOURS:
+            return timedelta(hours=2)
+        elif self == Interval.FOUR_HOURS:
+            return timedelta(hours=4)
+        elif self == Interval.SIX_HOURS:
+            return timedelta(hours=6)
+        elif self == Interval.EIGHT_HOURS:
+            return timedelta(hours=8)
+        elif self == Interval.TWELVE_HOURS:
+            return timedelta(hours=12)
+        elif self == Interval.ONE_DAY:
+            return timedelta(days=1)
+        elif self == Interval.THREE_DAYS:
+            return timedelta(days=3)
+        elif self == Interval.ONE_WEEK:
+            return timedelta(weeks=1)
+        else:
+            return timedelta(minutes=1)  # Default to 1 minute if interval is not recognized
+
     def get_trigger_time(self, server_time: datetime, offset_ms: int = 0) -> datetime:
         """
         Calculates the next trigger time for the given interval based on server time.

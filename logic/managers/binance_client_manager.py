@@ -6,6 +6,7 @@ from logging import Logger
 from binance import Client
 from binance import enums
 from requests import Session
+from typing import Optional
 from configs import binance_config
 from models.order_response import OrderResponse
 
@@ -368,7 +369,7 @@ class BinanceClientManager():
         self.logger.debug(f"Latest price for {symbol} is {latest_price}.")
         return latest_price
     
-    async def async_futures_get_kline_data(self, symbol: str, interval: str, limit: int, session: aiohttp.ClientSession) -> list:
+    async def async_futures_get_kline_data(self, symbol: str, interval: str, limit: int, session: aiohttp.ClientSession, startTime: Optional[datetime] = None, endTime: Optional[datetime] = None) -> list:
         """Asynchronously retrieves kline (candlestick) data for a specific symbol.
 
         Args:
@@ -376,6 +377,8 @@ class BinanceClientManager():
             interval (str): Time interval for each kline (e.g., '1m', '1h', '1d').
             limit (int): Maximum number of klines to retrieve.
             session (aiohttp.ClientSession): Active aiohttp client session for making requests.
+            startTime (datetime, optional): Start time for kline data. Defaults to None.
+            endTime (datetime, optional): End time for kline data. Defaults to None.
 
         Returns:
             list: List of kline data where each kline is a list containing open time, open price,
@@ -384,8 +387,17 @@ class BinanceClientManager():
         Raises:
             Exception: If the API request fails.
         """
-        # Set the URL for the kline data endpoint
+        # Set the base URL for the kline data endpoint
         url = f"{binance_config.BASE_URL}/fapi/v1/klines?symbol={symbol}&interval={interval}&limit={limit}"
+        
+        # Add startTime and endTime parameters if provided
+        if startTime:
+            start_timestamp = int(startTime.timestamp() * 1000)
+            url += f"&startTime={start_timestamp}"
+        
+        if endTime:
+            end_timestamp = int(endTime.timestamp() * 1000)
+            url += f"&endTime={end_timestamp}"
 
         self.logger.debug(f"Getting kline data for {symbol} symbol, interval: {interval}, limit: {limit}, url: {url}.")
         
