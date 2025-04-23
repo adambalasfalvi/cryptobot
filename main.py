@@ -1,6 +1,4 @@
 import sys
-import os
-import asyncio
 from logic.strategies.szalai_strategy import SzalaiStrategy
 
 def main():
