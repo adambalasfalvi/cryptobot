@@ -1,11 +1,11 @@
 from math import ceil
 import sys
 import logging
-import logging.handlers
 import time
 import threading
 import asyncio
 import aiohttp
+import numpy
 from datetime import datetime
 from logging import Logger
 from concurrent.futures import ThreadPoolExecutor
@@ -705,7 +705,7 @@ class SzalaiStrategy:
         """
         price_precision = next(symbol_info.price_precision for symbol_info in self.symbol_info_list if symbol_info.symbol == symbol)
         tp_price = round(self._calculate_take_profit_price(position_price, side), price_precision)
-        self.logger.info(f"Creating take profit order, symbol: {symbol}, price: {tp_price}, side: {side.name}.")
+        self.logger.info(f"Creating take profit order, symbol: {symbol}, price: {numpy.format_float_positional(tp_price)}, side: {side.name}.")
         if self.side == Side.LONG:
             return await self.client_manager.async_futures_create_sell_take_profit_market_order(symbol, tp_price, session)
         else:
@@ -720,7 +720,7 @@ class SzalaiStrategy:
         """
         price_precision = next(symbol_info.price_precision for symbol_info in self.symbol_info_list if symbol_info.symbol == symbol)
         sl_price = round(self._calculate_stop_loss_price(position_price, side), price_precision)
-        self.logger.info(f"Creating stop loss order, symbol: {symbol}, price: {sl_price}, side: {side.name}.")
+        self.logger.info(f"Creating stop loss order, symbol: {symbol}, price: {numpy.format_float_positional(sl_price)}, side: {side.name}.")
         if self.side == Side.LONG:
             return await self.client_manager.async_futures_create_sell_stop_market_order(symbol, sl_price, session)
         else:
@@ -744,12 +744,12 @@ class SzalaiStrategy:
         This method adjusts the price according to the take profit multiplier configured in
         the strategy configuration.
         """
-        self.logger.debug(f"Calculating take profit price, price: {price}, side: {side.name}.")
+        self.logger.debug(f"Calculating take profit price, price: {numpy.format_float_positional(price)}, side: {side.name}.")
         if side == Side.LONG:
             tp_price = price + (price * szalai_strategy_config.TAKE_PROFIT_MULTIPLIER.decimal_value)
         else:
             tp_price = price - (price * szalai_strategy_config.TAKE_PROFIT_MULTIPLIER.decimal_value)
-        self.logger.debug(f"Take profit price is {tp_price}.")
+        self.logger.debug(f"Take profit price is {numpy.format_float_positional(tp_price)}.")
         return tp_price
 
     def _calculate_stop_loss_price(self, price: float, side: Side) -> float:
@@ -759,12 +759,12 @@ class SzalaiStrategy:
         This method adjusts the price according to the stop loss multiplier configured in
         the strategy configuration.
         """
-        self.logger.debug(f"Calculating stop loss price, price: {price}, side: {side.name}.")
+        self.logger.debug(f"Calculating stop loss price, price: {numpy.format_float_positional(price)}, side: {side.name}.")
         if side == Side.LONG:
             sl_price = price - (price * szalai_strategy_config.STOP_LOSS_MULTIPLIER.decimal_value)
         else:
             sl_price = price + (price * szalai_strategy_config.STOP_LOSS_MULTIPLIER.decimal_value)
-        self.logger.debug(f"Stop loss price is {sl_price}.")
+        self.logger.debug(f"Stop loss price is {numpy.format_float_positional(sl_price)}.")
         return sl_price
 
     def _init_logger(self) -> Logger:

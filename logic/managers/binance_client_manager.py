@@ -1,6 +1,7 @@
 import aiohttp
 import hmac
 import hashlib
+import numpy
 from datetime import datetime
 from logging import Logger
 from binance import Client
@@ -524,7 +525,7 @@ class BinanceClientManager():
         timestamp = int(datetime.now().timestamp() * 1000)
 
         # Prepare the query string
-        query_string = f"symbol={symbol}&side=BUY&type=TAKE_PROFIT_MARKET&stopPrice={stop_price}&closePosition=true&newOrderRespType=RESULT&timestamp={timestamp}"
+        query_string = f"symbol={symbol}&side=BUY&type=TAKE_PROFIT_MARKET&stopPrice={numpy.format_float_positional(stop_price)}&closePosition=true&newOrderRespType=RESULT&timestamp={timestamp}"
 
         # Generate the HMAC SHA256 signature
         signature = hmac.new(
@@ -541,7 +542,7 @@ class BinanceClientManager():
             "X-MBX-APIKEY": binance_config.API_KEY
         }
 
-        self.logger.debug(f"Creating buy take profit market order, symbol: {symbol}, stop_price: {stop_price}, url: {url}.")
+        self.logger.debug(f"Creating buy take profit market order, symbol: {symbol}, stop_price: {numpy.format_float_positional(stop_price)}, url: {url}.")
 
         async with session.post(url, headers=headers) as response:
             if response.status == 200:
@@ -575,7 +576,7 @@ class BinanceClientManager():
         timestamp = int(datetime.now().timestamp() * 1000)
 
         # Prepare the query string
-        query_string = f"symbol={symbol}&side=SELL&type=TAKE_PROFIT_MARKET&stopPrice={stop_price}&closePosition=true&newOrderRespType=RESULT&timestamp={timestamp}"
+        query_string = f"symbol={symbol}&side=SELL&type=TAKE_PROFIT_MARKET&stopPrice={numpy.format_float_positional(stop_price)}&closePosition=true&newOrderRespType=RESULT&timestamp={timestamp}"
 
         # Generate the HMAC SHA256 signature
         signature = hmac.new(
@@ -592,7 +593,7 @@ class BinanceClientManager():
             "X-MBX-APIKEY": binance_config.API_KEY
         }
 
-        self.logger.debug(f"Creating sell take profit market order, symbol: {symbol}, stop_price: {stop_price}, url: {url}.")
+        self.logger.debug(f"Creating sell take profit market order, symbol: {symbol}, stop_price: {numpy.format_float_positional(stop_price)}, url: {url}.")
 
         async with session.post(url, headers=headers) as response:
             if response.status == 200:
@@ -626,7 +627,7 @@ class BinanceClientManager():
         timestamp = int(datetime.now().timestamp() * 1000)
 
         # Prepare the query string
-        query_string = f"symbol={symbol}&side=BUY&type=STOP_MARKET&stopPrice={stop_price}&closePosition=true&newOrderRespType=RESULT&timestamp={timestamp}"
+        query_string = f"symbol={symbol}&side=BUY&type=STOP_MARKET&stopPrice={numpy.format_float_positional(stop_price)}&closePosition=true&newOrderRespType=RESULT&timestamp={timestamp}"
 
         # Generate the HMAC SHA256 signature
         signature = hmac.new(
@@ -643,7 +644,7 @@ class BinanceClientManager():
             "X-MBX-APIKEY": binance_config.API_KEY
         }
 
-        self.logger.debug(f"Creating buy stop market order, symbol: {symbol}, stop_price: {stop_price}, url: {url}.")
+        self.logger.debug(f"Creating buy stop market order, symbol: {symbol}, stop_price: {numpy.format_float_positional(stop_price)}, url: {url}.")
 
         async with session.post(url, headers=headers) as response:
             if response.status == 200:
@@ -677,7 +678,7 @@ class BinanceClientManager():
         timestamp = int(datetime.now().timestamp() * 1000)
 
         # Prepare the query string
-        query_string = f"symbol={symbol}&side=SELL&type=STOP_MARKET&stopPrice={stop_price}&closePosition=true&newOrderRespType=RESULT&timestamp={timestamp}"
+        query_string = f"symbol={symbol}&side=SELL&type=STOP_MARKET&stopPrice={numpy.format_float_positional(stop_price)}&closePosition=true&newOrderRespType=RESULT&timestamp={timestamp}"
 
         # Generate the HMAC SHA256 signature
         signature = hmac.new(
@@ -694,7 +695,7 @@ class BinanceClientManager():
             "X-MBX-APIKEY": binance_config.API_KEY
         }
 
-        self.logger.debug(f"Creating sell stop market order, symbol: {symbol}, stop_price: {stop_price}, url: {url}.")
+        self.logger.debug(f"Creating sell stop market order, symbol: {symbol}, stop_price: {numpy.format_float_positional(stop_price)}, url: {url}.")
 
         async with session.post(url, headers=headers) as response:
             if response.status == 200:
