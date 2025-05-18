@@ -1,4 +1,3 @@
-from math import ceil
 import sys
 import logging
 import time
@@ -241,6 +240,7 @@ class SzalaiStrategy:
         This method retrieves the historical kline data for the trading symbol and determines the starting side.
         If the price has increased (close price is higher than open price), the starting side will be SHORT.
         If the price has declined (close price is lower than open price), the starting side will be LONG.
+        If the REVERSE_FIRST_ORDER_SIDE config is set to True, the side will be reversed.
         """   
         symbol_kline_data = next(kline_data for kline_data in self.kline_data_list if kline_data.symbol == self.trading_symbol)
 
@@ -250,6 +250,10 @@ class SzalaiStrategy:
         # If declined
         else:
             self.side = Side.LONG
+
+        if szalai_strategy_config.REVERSE_FIRST_ORDER_SIDE:
+            self.logger.info("The REVERSE_FIRST_ORDER_SIDE config is set to True. The side will be reversed.")
+            self.side = Side.LONG if self.side == Side.SHORT else Side.SHORT
     
         self.logger.info(f"The calculated first trading side is {self.side}.")
     
@@ -274,7 +278,7 @@ class SzalaiStrategy:
         while not self.stop_event.is_set():
             try:
                 # Sync OS time
-                self.__sync_os_time()
+                self._sync_os_time()
 
                 # Get the server time from Binance
                 server_time = self.client_manager.futures_get_server_time()
@@ -327,7 +331,7 @@ class SzalaiStrategy:
         self.logger.info(f"Next trigger is set to {next_trigger}.")
         return next_trigger
 
-    def __sync_os_time(self) -> None:
+    def _sync_os_time(self) -> None:
         """
         Synchronizes the OS time on Windows platforms.
         

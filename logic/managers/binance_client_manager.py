@@ -6,7 +6,6 @@ from datetime import datetime
 from logging import Logger
 from binance import Client
 from binance import enums
-from requests import Session
 from typing import Optional
 from configs import binance_config
 from models.order_response import OrderResponse

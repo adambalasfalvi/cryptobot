@@ -1,7 +1,7 @@
 from models.percentage import Percentage
 
 # List of trading symbols to be used in the strategy
-TRADE_SYMBOLS = [ "BTCUSDT" ]
+TRADE_SYMBOLS = [ "1000SATSUSDT" ]
 # TRADE_SYMBOLS = [
 #     "BTCUSDT", "ETHUSDT", "BCHUSDT", "XRPUSDT", "EOSUSDT", "PEOPLEUSDT"
 # ]
@@ -13,7 +13,7 @@ ACCOUNT_CURRENCY = "USDT"
 BAR_INTERVAL = "1m"
 
 # Minimum percentage change in price to consider for volatility calculations
-MIN_CHANGE = Percentage(0.001)
+MIN_CHANGE = Percentage(0)
 
 # Maximum allowable positive change in account balance before stopping the strategy in percentage
 MAX_POSITIVE_ACCOUNT_BALANCE_CHANGE = Percentage(5)
@@ -44,3 +44,6 @@ TRIGGER_TIME_OFFSET = 700
 
 # Enable or disable logging of kline data
 LOG_KLINE_DATA = True
+
+# Reverse the first order side of the strategy
+REVERSE_FIRST_ORDER_SIDE = False
