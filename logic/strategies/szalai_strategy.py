@@ -66,7 +66,7 @@ class SzalaiStrategy:
 
     async def start_strategy(self) -> None:
         # Initialize the strategy
-        self._init_strategy()
+        await self._init_strategy()
 
         # Run the strategy
         await self._run_strategy()
@@ -101,7 +101,7 @@ class SzalaiStrategy:
 
         self.logger.info("Szalai strategy has stopped.")
     
-    def _init_strategy(self) -> None:
+    async def _init_strategy(self) -> None:
         # Log the start of the strategy execution
         self.logger.info("Starting Szalai strategy.")
 
@@ -129,12 +129,12 @@ class SzalaiStrategy:
         self.interval_trigger_thread.start()
 
         # Start the WebSocket manager to receive real-time updates for market data and user data
-        self.websocket_manager.start_websocket()
+        # self.websocket_manager.start_websocket()
 
         # Set up the WebSocket for user data to receive order updates and provide a handler for updates
-        self.websocket_manager.setup_user_data_websocket(
-            self._update_order_data_handler           # Handler method to process order data updates
-        )
+        # self.websocket_manager.setup_user_data_websocket(
+        #     self._update_order_data_handler           # Handler method to process order data updates
+        # )
 
     async def _run_strategy(self) -> None:
         # Main strategy loop to continuously check and act upon various conditions until the stop event is set

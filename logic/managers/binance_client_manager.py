@@ -2,6 +2,7 @@ import aiohttp
 import hmac
 import hashlib
 import numpy
+import nest_asyncio
 from datetime import datetime
 from logging import Logger
 from binance import Client
@@ -9,6 +10,9 @@ from binance import enums
 from typing import Optional
 from configs import binance_config
 from models.order_response import OrderResponse
+
+# Apply nest_asyncio to allow nested event loops
+nest_asyncio.apply()
 
 class BinanceClientManager():
     """This class manages Binance client operations including creating orders, 
