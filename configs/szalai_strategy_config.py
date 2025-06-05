@@ -1,10 +1,10 @@
 from models.percentage import Percentage
 
 # List of trading symbols to be used in the strategy
-TRADE_SYMBOLS = [ "1000SATSUSDT" ]
-# TRADE_SYMBOLS = [
-#     "BTCUSDT", "ETHUSDT", "BCHUSDT", "XRPUSDT", "EOSUSDT", "PEOPLEUSDT"
-# ]
+# TRADE_SYMBOLS = [ "1000SATSUSDT" ]
+TRADE_SYMBOLS = [
+    "BTCUSDT", "ETHUSDT", "BCHUSDT", "XRPUSDT", "EOSUSDT", "PEOPLEUSDT"
+]
 
 # Currency of the account being used for trading
 ACCOUNT_CURRENCY = "USDT"

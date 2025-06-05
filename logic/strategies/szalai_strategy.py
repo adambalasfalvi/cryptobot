@@ -62,16 +62,16 @@ class SzalaiStrategy:
         self.trading_symbol_take_profit_order: OrderResponse
         self.trading_symbol_stop_loss_order : OrderResponse
         self.interval_trigger_thread: threading.Thread
+        self.session: aiohttp.ClientSession
 
-
-    def start_strategy(self) -> None:
+    async def start_strategy(self) -> None:
         # Initialize the strategy
         self._init_strategy()
 
         # Run the strategy
-        asyncio.run(self._run_strategy())
+        await self._run_strategy()
 
-    def stop_strategy(self) -> None:
+    async def stop_strategy(self) -> None:
         """
         Stops the Szalai trading strategy.
 
@@ -81,19 +81,32 @@ class SzalaiStrategy:
         self.logger.info("Stopping Szalai strategy...")
         with self.state_lock:
             self.state = State.STOPPED
+
         # Set the stop event to signal the run_strategy loop to exit
         self.stop_event.set()
+
         # Stop the WebSocket manager to cease receiving data
         self.websocket_manager.stop_websocket()
+
         # Close all open positions and cancel all orders for all symbols
         self._close_open_positions_and_cancel_orders_for_all_symbols()
+
         # Wait for the interval trigger thread to complete
         self.interval_trigger_thread.join()
+
+        # Close the aiohttp session if it exists
+        if self.session and not self.session.closed:
+            self.logger.debug("Closing aiohttp session.")
+            await self.session.close()
+
         self.logger.info("Szalai strategy has stopped.")
     
     def _init_strategy(self) -> None:
         # Log the start of the strategy execution
         self.logger.info("Starting Szalai strategy.")
+
+        # Initialize session
+        self.session = aiohttp.ClientSession()
 
         # Check if all symbols exist in Binance
         if not self._check_if_all_symbol_exists_in_binance():
@@ -399,17 +412,17 @@ class SzalaiStrategy:
         self.logger.info(f"Account balance change: {round(balance_change_percentage, szalai_strategy_config.LOGGING_PRECISION)}%.")
 
         # Define the upper and lower balance change limits
-        upper_balance_limit = szalai_strategy_config.MAX_POSITIVE_ACCOUNT_BALANCE_CHANGE.percent_value
-        lower_balance_limit = szalai_strategy_config.MAX_NEGATIVE_ACCOUNT_BALANCE_CHANGE.percent_value
+        upper_balance_change_limit = szalai_strategy_config.MAX_POSITIVE_ACCOUNT_BALANCE_CHANGE.percent_value
+        lower_balance_change_limit = szalai_strategy_config.MAX_NEGATIVE_ACCOUNT_BALANCE_CHANGE.percent_value
 
         # Check if the balance change exceeds the allowed limits
-        if balance_change_percentage >= upper_balance_limit:
+        if balance_change_percentage >= upper_balance_change_limit:
             self.logger.info(f"Max positive account balance change of {szalai_strategy_config.MAX_POSITIVE_ACCOUNT_BALANCE_CHANGE} has been reached by {self.trading_symbol} symbol.")
             self.logger.info(f"A new symbol is to be searched.")
             # Reinitialize the starting balance
             self.start_account_balance = current_account_balance
             return True
-        elif balance_change_percentage <= lower_balance_limit:
+        elif balance_change_percentage <= lower_balance_change_limit:
             self.logger.info(f"Max negative account balance change of {szalai_strategy_config.MAX_NEGATIVE_ACCOUNT_BALANCE_CHANGE} has been reached by {self.trading_symbol} symbol.")
             self.logger.info(f"A new symbol is to be searched.")
             # Reinitialize the starting balance
@@ -443,52 +456,51 @@ class SzalaiStrategy:
         
         self.logger.debug(f"Fetching kline data with start time: {start_time}, end time: {end_time}")
 
-        async with aiohttp.ClientSession() as session:
-            tasks = [
-                self.client_manager.async_futures_get_kline_data(
-                    kline_data.symbol, self.interval.__str__(), 1, session, start_time, end_time
-                ) 
-                for kline_data in self.kline_data_list
-            ]
+        tasks = [
+            self.client_manager.async_futures_get_kline_data(
+                kline_data.symbol, self.interval.__str__(), 1, self.session, start_time, end_time
+            ) 
+            for kline_data in self.kline_data_list
+        ]
 
-            results = await asyncio.gather(*tasks, return_exceptions=True)
+        results = await asyncio.gather(*tasks, return_exceptions=True)
 
-            # Pair each kline data with its corresponding result
-            for kline_data, current_kline_data in zip(self.kline_data_list, results):
-                # Check if its an Exception
-                if isinstance(current_kline_data, Exception):
-                    self.logger.error(f"Error fetching kline data for {kline_data.symbol}: {current_kline_data}")
-                    continue              
+        # Pair each kline data with its corresponding result
+        for kline_data, current_kline_data in zip(self.kline_data_list, results):
+            # Check if its an Exception
+            if isinstance(current_kline_data, Exception):
+                self.logger.error(f"Error fetching kline data for {kline_data.symbol}: {current_kline_data}")
+                continue              
 
-                if current_kline_data and isinstance(current_kline_data, list) and len(current_kline_data) > 0:
-                    try:
-                        kline_data.interval = self.interval.__str__()
-                        kline_data.open_price = float(current_kline_data[0][1])
-                        kline_data.high_price = float(current_kline_data[0][2])
-                        kline_data.low_price = float(current_kline_data[0][3])
-                        kline_data.close_price = float(current_kline_data[0][4])
-                        kline_data.open_time = datetime.fromtimestamp(int(current_kline_data[0][0]) / 1000)
-                        kline_data.close_time = datetime.fromtimestamp(int(current_kline_data[0][6]) / 1000)
+            if current_kline_data and isinstance(current_kline_data, list) and len(current_kline_data) > 0:
+                try:
+                    kline_data.interval = self.interval.__str__()
+                    kline_data.open_price = float(current_kline_data[0][1])
+                    kline_data.high_price = float(current_kline_data[0][2])
+                    kline_data.low_price = float(current_kline_data[0][3])
+                    kline_data.close_price = float(current_kline_data[0][4])
+                    kline_data.open_time = datetime.fromtimestamp(int(current_kline_data[0][0]) / 1000)
+                    kline_data.close_time = datetime.fromtimestamp(int(current_kline_data[0][6]) / 1000)
 
-                        # Log the kline data if kline data logging is enabled
-                        if szalai_strategy_config.LOG_KLINE_DATA:
-                            self.logger.kline_data( # type: ignore
-                                f"Symbol: {kline_data.symbol}, "
-                                f"Interval: {kline_data.interval}, "
-                                f"Open Time: {kline_data.open_time}, "
-                                f"Close Time: {kline_data.close_time}, "
-                                f"Open: {round(kline_data.open_price, szalai_strategy_config.LOGGING_PRECISION)}, "
-                                f"High: {round(kline_data.high_price, szalai_strategy_config.LOGGING_PRECISION)}, "
-                                f"Low: {round(kline_data.low_price, szalai_strategy_config.LOGGING_PRECISION)}, "
-                                f"Close: {round(kline_data.close_price, szalai_strategy_config.LOGGING_PRECISION)}, "
-                                f"Change: {round(kline_data.change, szalai_strategy_config.LOGGING_PRECISION)}, "
-                                f"Percentage Change: {round(kline_data.percentage_change, szalai_strategy_config.LOGGING_PRECISION)}%, "
-                                f"Raw Data: {current_kline_data}"
-                            )
+                    # Log the kline data if kline data logging is enabled
+                    if szalai_strategy_config.LOG_KLINE_DATA:
+                        self.logger.kline_data( # type: ignore
+                            f"Symbol: {kline_data.symbol}, "
+                            f"Interval: {kline_data.interval}, "
+                            f"Open Time: {kline_data.open_time}, "
+                            f"Close Time: {kline_data.close_time}, "
+                            f"Open: {round(kline_data.open_price, szalai_strategy_config.LOGGING_PRECISION)}, "
+                            f"High: {round(kline_data.high_price, szalai_strategy_config.LOGGING_PRECISION)}, "
+                            f"Low: {round(kline_data.low_price, szalai_strategy_config.LOGGING_PRECISION)}, "
+                            f"Close: {round(kline_data.close_price, szalai_strategy_config.LOGGING_PRECISION)}, "
+                            f"Change: {round(kline_data.change, szalai_strategy_config.LOGGING_PRECISION)}, "
+                            f"Percentage Change: {round(kline_data.percentage_change, szalai_strategy_config.LOGGING_PRECISION)}%, "
+                            f"Raw Data: {current_kline_data}"
+                        )
 
-                    except (IndexError, ValueError, TypeError) as e:
-                        self.logger.error(f"Error processing kline data for {kline_data.symbol}: {e}")
-                        continue
+                except (IndexError, ValueError, TypeError) as e:
+                    self.logger.error(f"Error processing kline data for {kline_data.symbol}: {e}")
+                    continue
 
     async def _set_up_orders(self) -> OrderErrorCode:
         """
@@ -503,46 +515,45 @@ class SzalaiStrategy:
         self.logger.info(f"Setting up orders for symbol {self.trading_symbol}.")
         # TODO: check if there is enough balance to place the order
         try:
-            async with aiohttp.ClientSession() as session:
+            
+            try:
+                self.trading_symbol_position_order = await self._create_position_order(self.trading_symbol, self.trading_symbol_quantity, self.side, self.session)
+                self.order_list.extend([self.trading_symbol_position_order])
+            except Exception as e:
+                self.logger.error(f"Error creating position order: {e}")
+                return OrderErrorCode.POSITION_ORDER_FAILED
 
-                try:
-                    self.trading_symbol_position_order = await self._create_position_order(self.trading_symbol, self.trading_symbol_quantity, self.side, session)
-                    self.order_list.extend([self.trading_symbol_position_order])
-                except Exception as e:
-                    self.logger.error(f"Error creating position order: {e}")
-                    return OrderErrorCode.POSITION_ORDER_FAILED
+            order_results = await asyncio.gather(
+                self._create_take_profit_order(self.trading_symbol, self.trading_symbol_position_order.average_price, self.side, self.session),
+                self._create_stop_loss_order(self.trading_symbol, self.trading_symbol_position_order.average_price, self.side, self.session),
+                return_exceptions=True
+            )
 
-                order_results = await asyncio.gather(
-                    self._create_take_profit_order(self.trading_symbol, self.trading_symbol_position_order.average_price, self.side, session),
-                    self._create_stop_loss_order(self.trading_symbol, self.trading_symbol_position_order.average_price, self.side, session),
-                    return_exceptions=True
-                )
+            # Check if orders were created successfully
+            if isinstance(order_results[0], Exception) and isinstance(order_results[1], Exception):
+                self.logger.error("Both take profit and stop loss orders failed.")
+                self.logger.error(f"Take profit order creation errror: {order_results[0]}")
+                self.logger.error(f"Stop loss order creation error: {order_results[1]}")
+                return OrderErrorCode.BOTH_ORDERS_FAILED
+            
+            if isinstance(order_results[0], Exception):
+                self.logger.error(f"Take profit order creation failed: {order_results[0]}")
+                return OrderErrorCode.TAKE_PROFIT_ORDER_FAILED
+            
+            if isinstance(order_results[1], Exception):
+                self.logger.error(f"Stop loss order creation failed: {order_results[1]}")
+                return OrderErrorCode.STOP_LOSS_ORDER_FAILED
 
-                # Check if orders were created successfully
-                if isinstance(order_results[0], Exception) and isinstance(order_results[1], Exception):
-                    self.logger.error("Both take profit and stop loss orders failed.")
-                    self.logger.error(f"Take profit order creation errror: {order_results[0]}")
-                    self.logger.error(f"Stop loss order creation error: {order_results[1]}")
-                    return OrderErrorCode.BOTH_ORDERS_FAILED
-                
-                if isinstance(order_results[0], Exception):
-                    self.logger.error(f"Take profit order creation failed: {order_results[0]}")
-                    return OrderErrorCode.TAKE_PROFIT_ORDER_FAILED
-                
-                if isinstance(order_results[1], Exception):
-                    self.logger.error(f"Stop loss order creation failed: {order_results[1]}")
-                    return OrderErrorCode.STOP_LOSS_ORDER_FAILED
-
-                # Process the take profit and stop loss order results
-                for i, result in enumerate(order_results):             
-                    # Store the take profit order result
-                    if i == 0 and result and isinstance(result, OrderResponse):                    
-                        self.trading_symbol_take_profit_order = result
-                        self.order_list.append(self.trading_symbol_take_profit_order)
-                    # Store the stop loss order result
-                    elif i == 1 and result and isinstance(result, OrderResponse):
-                        self.trading_symbol_stop_loss_order = result
-                        self.order_list.append(self.trading_symbol_stop_loss_order)
+            # Process the take profit and stop loss order results
+            for i, result in enumerate(order_results):             
+                # Store the take profit order result
+                if i == 0 and result and isinstance(result, OrderResponse):                    
+                    self.trading_symbol_take_profit_order = result
+                    self.order_list.append(self.trading_symbol_take_profit_order)
+                # Store the stop loss order result
+                elif i == 1 and result and isinstance(result, OrderResponse):
+                    self.trading_symbol_stop_loss_order = result
+                    self.order_list.append(self.trading_symbol_stop_loss_order)
 
             return OrderErrorCode.SUCCESS
         
