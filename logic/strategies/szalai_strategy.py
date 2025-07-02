@@ -4,6 +4,8 @@ import time
 import threading
 import asyncio
 import aiohttp
+import traceback
+from attr import has
 import numpy
 from datetime import datetime
 from logging import Logger
@@ -196,7 +198,7 @@ class SzalaiStrategy:
                         pass
                     case State.CONNECTION_RESTORED:
                         open_orders = self._what_orders_are_open(self.trading_symbol)
-                        if open_orders != 2:
+                        if len(open_orders) != 0 or len(open_orders) != 2:
                             self._cancel_open_orders_for_symbol(self.trading_symbol)
                             self.logger.info("Updating state to TAKING_POSITION_AND_ORDERS.")
                             self.state = State.TAKING_POSITION_AND_ORDERS
@@ -309,7 +311,8 @@ class SzalaiStrategy:
                 self.logger.info(f"The configured {self.interval.value} interval has been triggered.")
             
             except Exception as e:
-                self.logger.error(f"Internet connection has been lost, retry in {szalai_strategy_config.RETRY_INTERVAL} seconds.")
+                self.logger.debug(f"Error during interval trigger: {type(e).__name__}: {e}\n{traceback.format_exc()}")
+                self.logger.error(f"Connection has failed during interval trigger, retrying in {szalai_strategy_config.RETRY_INTERVAL} seconds.")
                 with self.state_lock:
                     if self.state != State.CONNECTION_LOST:
                         self.logger.info("Updating state to CONNECTION_LOST.")
@@ -370,14 +373,20 @@ class SzalaiStrategy:
             list[OrderResponse]: A list of open orders for the trading symbol.
         """
         self.logger.debug(f"Checking what orders are open for symbol {symbol}.")
-        # Get all open orders for the symbol from exchange
-        exchange_symbol_orders = self.client_manager.futures_get_current_all_open_orders(symbol)
-        # Get the saved orders from the strategy
-        saved_symbol_orders = [self.trading_symbol_take_profit_order, self.trading_symbol_stop_loss_order]
-        # Filter the saved orders to include only those that are still open
-        open_orders = [order for order in saved_symbol_orders if order.client_order_id in [order["clientOrderId"] for order in exchange_symbol_orders]]
-        self.logger.debug(f"Symbol {symbol} has the following open order(s): {open_orders}.")
-        return open_orders
+
+        # Check if the trading_symbol_take_profit_order and trading_symbol_stop_loss_order attributes exist
+        if hasattr(self, 'trading_symbol_take_profit_order') and hasattr(self, 'trading_symbol_stop_loss_order'):
+
+            # Get the orders from the strategy
+            saved_symbol_orders = [self.trading_symbol_take_profit_order, self.trading_symbol_stop_loss_order]
+            # Get all open orders for the symbol from exchange
+            exchange_symbol_orders = self.client_manager.futures_get_current_all_open_orders(symbol)
+            # Filter the saved orders to include only those that are still open
+            open_orders = [order for order in saved_symbol_orders if order.client_order_id in [order["clientOrderId"] for order in exchange_symbol_orders]]
+            self.logger.debug(f"Symbol {symbol} has the following open order(s): {open_orders}.")
+            return open_orders
+        
+        return []
 
     def _is_balance_change_limit_reached(self) -> bool:
         """
