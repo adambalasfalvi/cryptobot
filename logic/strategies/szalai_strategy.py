@@ -198,7 +198,10 @@ class SzalaiStrategy:
                         pass
                     case State.CONNECTION_RESTORED:
                         open_orders = self._what_orders_are_open(self.trading_symbol)
-                        if len(open_orders) != 0 or len(open_orders) != 2:
+                        if len(open_orders) == 0:
+                            self.logger.info("Updating state to NO_TRADE.")
+                            self.state = State.NO_TRADE
+                        elif len(open_orders) != 2:
                             self._cancel_open_orders_for_symbol(self.trading_symbol)
                             self.logger.info("Updating state to TAKING_POSITION_AND_ORDERS.")
                             self.state = State.TAKING_POSITION_AND_ORDERS
@@ -376,7 +379,6 @@ class SzalaiStrategy:
 
         # Check if the trading_symbol_take_profit_order and trading_symbol_stop_loss_order attributes exist
         if hasattr(self, 'trading_symbol_take_profit_order') and hasattr(self, 'trading_symbol_stop_loss_order'):
-
             # Get the orders from the strategy
             saved_symbol_orders = [self.trading_symbol_take_profit_order, self.trading_symbol_stop_loss_order]
             # Get all open orders for the symbol from exchange
@@ -386,6 +388,7 @@ class SzalaiStrategy:
             self.logger.debug(f"Symbol {symbol} has the following open order(s): {open_orders}.")
             return open_orders
         
+        self.logger.debug(f"No open orders found for symbol {symbol}.")
         return []
 
     def _is_balance_change_limit_reached(self) -> bool:
