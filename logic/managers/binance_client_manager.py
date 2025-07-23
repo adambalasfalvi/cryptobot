@@ -23,6 +23,18 @@ class BinanceClientManager():
         self.logger = logger
         self.client = Client(binance_config.API_KEY, binance_config.API_SECRET, testnet=binance_config.TESTNET)
 
+    def futures_ping_server(self) -> None:
+        """Pings the Binance server to check connectivity.
+
+        Returns:
+            None: This method does not return any value.
+        """
+        try:
+            self.client.ping()
+            self.logger.debug("Ping to Binance server was successful.")
+        except Exception as e:
+            self.logger.error(f"Error pinging Binance server: {str(e)}")
+
     def futures_get_exchange_info(self) -> dict:
         """Gets the exchange information for the Binance futures market.
 

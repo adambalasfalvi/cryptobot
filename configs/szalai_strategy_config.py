@@ -39,6 +39,9 @@ RETRY_INTERVAL = 5
 # Logging precision for displaying floating-point numbers
 LOGGING_PRECISION = 4
 
+# Enable or disable debug mode for the strategy
+LOG_DEBUG_DATA = True
+
 # Trigger time offset in milliseconds for the strategy
 TRIGGER_TIME_OFFSET = 700
 

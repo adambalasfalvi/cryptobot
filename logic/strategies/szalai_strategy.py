@@ -5,7 +5,6 @@ import threading
 import asyncio
 import aiohttp
 import traceback
-from attr import has
 import numpy
 from datetime import datetime
 from logging import Logger
@@ -285,22 +284,28 @@ class SzalaiStrategy:
                 # Sync OS time
                 self._sync_os_time()
 
-                # Get the server time from Binance
-                server_time = self.client_manager.futures_get_server_time()
+                # Ping the server
+                self.client_manager.futures_ping_server()
 
-                # Only set the state to CONNECTION_RESTORED if the current state is CONNECTION_LOST
+                # If the ping was successful, set the state to CONNECTION_RESTORED if the current state is CONNECTION_LOST
                 with self.state_lock:
                     if self.state == State.CONNECTION_LOST:
                         self.logger.info("Connection restored. Updating state to CONNECTION_RESTORED.")
                         self.state = State.CONNECTION_RESTORED
+                
+                # Get the server time from Binance
+                server_time = self.client_manager.futures_get_server_time()
 
+                # Calculate the next trigger time
                 trigger_time = self._calculate_trigger_time(server_time)
                 time_to_sleep = (trigger_time - server_time).total_seconds()
-                self.logger.debug(f"Time to sleep: {time_to_sleep} seconds.")
+
+                if szalai_strategy_config.LOG_DEBUG_DATA:
+                    self.logger.debug(f"Time to sleep: {time_to_sleep} seconds.")
 
                 # Sleep until the next trigger time
                 if time_to_sleep > 0:
-                    time.sleep(time_to_sleep)
+                    self._precise_sleep_until(trigger_time)
 
                 if self.stop_event.is_set():
                     break
@@ -314,7 +319,9 @@ class SzalaiStrategy:
                 self.logger.info(f"The configured {self.interval.value} interval has been triggered.")
             
             except Exception as e:
-                self.logger.debug(f"Error during interval trigger: {type(e).__name__}: {e}\n{traceback.format_exc()}")
+                if szalai_strategy_config.LOG_DEBUG_DATA:
+                    self.logger.debug(f"Error during interval trigger: {type(e).__name__}: {e}\n{traceback.format_exc()}")
+
                 self.logger.error(f"Connection has failed during interval trigger, retrying in {szalai_strategy_config.RETRY_INTERVAL} seconds.")
                 with self.state_lock:
                     if self.state != State.CONNECTION_LOST:
@@ -336,6 +343,21 @@ class SzalaiStrategy:
         next_trigger = self.interval.get_trigger_time(server_time, offset_ms)
         self.logger.info(f"Next trigger is set to {next_trigger}.")
         return next_trigger
+    
+    def _precise_sleep_until(self, target_time: datetime) -> None:
+        """Sleep with higher precision until target time."""
+        while True:
+            current_time = datetime.now()
+            time_diff = (target_time - current_time).total_seconds()
+            
+            if time_diff <= 0:
+                break
+                
+            # Use shorter sleeps for the last 100ms for better precision
+            if time_diff > 0.1:
+                time.sleep(time_diff - 0.05)  # Sleep most of the time, leave 50ms buffer
+            else:
+                time.sleep(0.001)  # 1ms precision sleep for final adjustment
 
     def _sync_os_time(self) -> None:
         """
@@ -345,7 +367,10 @@ class SzalaiStrategy:
         It logs the result of the synchronization attempt.
         """
         if sys.platform == "win32":
-            self.logger.debug("Synchronizing OS time on Windows.")
+
+            if szalai_strategy_config.LOG_DEBUG_DATA:
+                self.logger.debug("Synchronizing OS time on Windows.")
+
             try:
                 import subprocess
                 result = subprocess.run(
@@ -375,7 +400,9 @@ class SzalaiStrategy:
         Returns:
             list[OrderResponse]: A list of open orders for the trading symbol.
         """
-        self.logger.debug(f"Checking what orders are open for symbol {symbol}.")
+
+        if szalai_strategy_config.LOG_DEBUG_DATA:
+            self.logger.debug(f"Checking what orders are open for symbol {symbol}.")
 
         # Check if the trading_symbol_take_profit_order and trading_symbol_stop_loss_order attributes exist
         if hasattr(self, 'trading_symbol_take_profit_order') and hasattr(self, 'trading_symbol_stop_loss_order'):
@@ -385,10 +412,15 @@ class SzalaiStrategy:
             exchange_symbol_orders = self.client_manager.futures_get_current_all_open_orders(symbol)
             # Filter the saved orders to include only those that are still open
             open_orders = [order for order in saved_symbol_orders if order.client_order_id in [order["clientOrderId"] for order in exchange_symbol_orders]]
-            self.logger.debug(f"Symbol {symbol} has the following open order(s): {open_orders}.")
+
+            if szalai_strategy_config.LOG_DEBUG_DATA:
+                self.logger.debug(f"Symbol {symbol} has the following open order(s): {open_orders}.")
+
             return open_orders
         
-        self.logger.debug(f"No open orders found for symbol {symbol}.")
+        if szalai_strategy_config.LOG_DEBUG_DATA:
+            self.logger.debug(f"No open orders found for symbol {symbol}.")
+
         return []
 
     def _is_balance_change_limit_reached(self) -> bool:
@@ -453,7 +485,8 @@ class SzalaiStrategy:
         # the time difference for each interval type
         start_time = end_time - self.interval.timedelta
         
-        self.logger.debug(f"Fetching kline data with start time: {start_time}, end time: {end_time}")
+        if szalai_strategy_config.LOG_DEBUG_DATA:
+            self.logger.debug(f"Fetching kline data with start time: {start_time}, end time: {end_time}")
 
         async with aiohttp.ClientSession() as session:
             tasks = [
@@ -674,7 +707,9 @@ class SzalaiStrategy:
         This method processes order trade updates, adjusts the status of existing orders, and
         sets flags for checking profit and orders as necessary.
         """
-        self.logger.debug(f"Trade update, message: {message}.")
+        if szalai_strategy_config.LOG_DEBUG_DATA:
+            self.logger.debug(f"Trade update, message: {message}.")
+
         event_type = message.get("e")
         client_order_id = message.get("o", {}).get("c", None)
 
@@ -682,7 +717,9 @@ class SzalaiStrategy:
             status = message.get("o", {}).get("X", None)
             order = next(order for order in self.order_list if order.client_order_id == client_order_id)
             order.status = status
-            self.logger.debug(f"Order has been updated, {order}.")
+
+            if szalai_strategy_config.LOG_DEBUG_DATA:
+                self.logger.debug(f"Order has been updated, {order}.")
             
             with self.state_lock:
                 if order.type == "TAKE_PROFIT_MARKET" and order.status == "FILLED":
@@ -698,7 +735,8 @@ class SzalaiStrategy:
                     return
 
                 if (order.type in ["STOP_MARKET", "TAKE_PROFIT_MARKET"]) and order.status == "CANCELED":
-                    self.logger.debug(f"{order.type} order has been canceled.")
+                    if szalai_strategy_config.LOG_DEBUG_DATA:
+                        self.logger.debug(f"{order.type} order has been canceled.")
 
     async def _create_position_order(self, symbol: str, quantity: float, side: Side, session: aiohttp.ClientSession) -> OrderResponse:
         """
@@ -760,12 +798,17 @@ class SzalaiStrategy:
         This method adjusts the price according to the take profit multiplier configured in
         the strategy configuration.
         """
-        self.logger.debug(f"Calculating take profit price, price: {numpy.format_float_positional(price)}, side: {side.name}.")
+        if szalai_strategy_config.LOG_DEBUG_DATA:
+            self.logger.debug(f"Calculating take profit price, price: {numpy.format_float_positional(price)}, side: {side.name}.")
+
         if side == Side.LONG:
             tp_price = price + (price * szalai_strategy_config.TAKE_PROFIT_MULTIPLIER.decimal_value)
         else:
             tp_price = price - (price * szalai_strategy_config.TAKE_PROFIT_MULTIPLIER.decimal_value)
-        self.logger.debug(f"Take profit price is {numpy.format_float_positional(tp_price)}.")
+
+        if szalai_strategy_config.LOG_DEBUG_DATA:    
+            self.logger.debug(f"Take profit price is {numpy.format_float_positional(tp_price)}.")
+
         return tp_price
 
     def _calculate_stop_loss_price(self, price: float, side: Side) -> float:
@@ -775,12 +818,17 @@ class SzalaiStrategy:
         This method adjusts the price according to the stop loss multiplier configured in
         the strategy configuration.
         """
-        self.logger.debug(f"Calculating stop loss price, price: {numpy.format_float_positional(price)}, side: {side.name}.")
+        if szalai_strategy_config.LOG_DEBUG_DATA:
+            self.logger.debug(f"Calculating stop loss price, price: {numpy.format_float_positional(price)}, side: {side.name}.")
+        
         if side == Side.LONG:
             sl_price = price - (price * szalai_strategy_config.STOP_LOSS_MULTIPLIER.decimal_value)
         else:
             sl_price = price + (price * szalai_strategy_config.STOP_LOSS_MULTIPLIER.decimal_value)
-        self.logger.debug(f"Stop loss price is {numpy.format_float_positional(sl_price)}.")
+
+        if szalai_strategy_config.LOG_DEBUG_DATA:    
+            self.logger.debug(f"Stop loss price is {numpy.format_float_positional(sl_price)}.")
+
         return sl_price
 
     def _init_logger(self) -> Logger:
