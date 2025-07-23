@@ -113,7 +113,9 @@ class SzalaiStrategy:
                 executor.submit(self.client_manager.futures_change_leverage, symbol, szalai_strategy_config.LEVERAGE)
         
         # Start the interval trigger thread
-        self.interval_trigger_thread = threading.Thread(target=self._set_interval_trigger)
+        self.interval_trigger_thread = threading.Thread(
+            target=self._set_interval_trigger,
+            name="IntervalTriggerThread")
         self.interval_trigger_thread.start()
 
         # Start the WebSocket manager to receive real-time updates for market data and user data
@@ -263,7 +265,9 @@ class SzalaiStrategy:
     
     def _get_precision_information_for_symbols(self) -> None:
         """Get precision information for all symbols concurrently."""
-        with ThreadPoolExecutor(max_workers=len(szalai_strategy_config.TRADE_SYMBOLS)) as executor:
+        with ThreadPoolExecutor(
+            max_workers=len(szalai_strategy_config.TRADE_SYMBOLS)
+        ) as executor:
             for symbol_precision_info in executor.map(self.client_manager.futures_get_symbol_precision_info, szalai_strategy_config.TRADE_SYMBOLS):   
                 self.symbol_info_list.append(
                     Symbol(
@@ -858,13 +862,13 @@ class SzalaiStrategy:
         # Console handler for info level logs
         console_handler = logging.StreamHandler(stream=sys.stdout)
         console_handler.setLevel(logging.INFO)
-        console_handler.setFormatter(logging.Formatter("[%(asctime)s, %(levelname)s] %(message)s"))
+        console_handler.setFormatter(logging.Formatter("[%(asctime)s, %(threadName)s, %(levelname)s] %(message)s"))
         logger.addHandler(console_handler)
 
         # File handler for info level logs
         file_info_name = f"szalai_strategy_{datetime.now().strftime('%Y%m%d_%H%M')}.log"
         file_info_handler = logging.FileHandler(filename=file_info_name)
-        file_info_handler.setFormatter(logging.Formatter("[%(asctime)s, %(levelname)s] %(message)s"))
+        file_info_handler.setFormatter(logging.Formatter("[%(asctime)s, %(threadName)s, %(levelname)s] %(message)s"))
         file_info_handler.setLevel(logging.INFO)
         logger.addHandler(file_info_handler)
 
