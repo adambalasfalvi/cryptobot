@@ -1,13 +1,16 @@
+import queue
 import sys
 import logging
 import time
 import threading
 import asyncio
+from typing import Optional
 import aiohttp
 import traceback
 import numpy
 from datetime import datetime
 from logging import Logger
+from logging.handlers import QueueHandler, QueueListener
 from concurrent.futures import ThreadPoolExecutor
 from models.order_error_code import OrderErrorCode
 from models.order_response import OrderResponse
@@ -63,6 +66,7 @@ class SzalaiStrategy:
         self.trading_symbol_take_profit_order: OrderResponse
         self.trading_symbol_stop_loss_order : OrderResponse
         self.interval_trigger_thread: threading.Thread
+        self.queue_listener: Optional[QueueListener]
 
 
     def start_strategy(self) -> None:
@@ -82,14 +86,23 @@ class SzalaiStrategy:
         self.logger.info("Stopping Szalai strategy...")
         with self.state_lock:
             self.state = State.STOPPED
+
         # Set the stop event to signal the run_strategy loop to exit
         self.stop_event.set()
+
         # Stop the WebSocket manager to cease receiving data
         self.websocket_manager.stop_websocket()
+
         # Close all open positions and cancel all orders for all symbols
         self._close_open_positions_and_cancel_orders_for_all_symbols()
+
         # Wait for the interval trigger thread to complete
         self.interval_trigger_thread.join()
+
+        # Stop the queue listener if it exists
+        if self.queue_listener:
+            self.queue_listener.stop()
+
         self.logger.info("Szalai strategy has stopped.")
     
     def _init_strategy(self) -> None:
@@ -670,7 +683,7 @@ class SzalaiStrategy:
 
     def _close_open_positions_and_cancel_orders_for_all_symbols(self) -> None:
         """
-        Closes open positions and cancels all orders for all symbols.
+        Closes open positions and cancels all orders for all symbols listed in the configuration.
 
         This method iterates through each trading symbol and:
         - Cancels all open orders
@@ -856,41 +869,62 @@ class SzalaiStrategy:
         # Add the method to the Logger class
         setattr(logging.Logger, 'kline_data', kline_data)
 
+        # Create a queue for log messages (this makes logging non-blocking)
+        log_queue = queue.Queue(maxsize=10000)
+
+        # Create the main logger
         logger = logging.getLogger(__name__)
         logger.setLevel(logging.DEBUG)
+
+        # Create a queue handler to handle log messages asynchronously
+        queue_handler = QueueHandler(log_queue)
+        logger.addHandler(queue_handler)
+
+        # Create actual handlers (these will run in background thread)
+        handlers = []
 
         # Console handler for info level logs
         console_handler = logging.StreamHandler(stream=sys.stdout)
         console_handler.setLevel(logging.INFO)
         console_handler.setFormatter(logging.Formatter("[%(asctime)s, %(threadName)s, %(levelname)s] %(message)s"))
-        logger.addHandler(console_handler)
+        handlers.append(console_handler)
 
         # File handler for info level logs
         file_info_name = f"szalai_strategy_{datetime.now().strftime('%Y%m%d_%H%M')}.log"
         file_info_handler = logging.FileHandler(filename=file_info_name)
         file_info_handler.setFormatter(logging.Formatter("[%(asctime)s, %(threadName)s, %(levelname)s] %(message)s"))
         file_info_handler.setLevel(logging.INFO)
-        logger.addHandler(file_info_handler)
+        handlers.append(file_info_handler)
 
         # File handler for debug level logs
-        file_debug_name = f"szalai_strategy_debug_{datetime.now().strftime('%Y%m%d_%H%M')}.log"
-        file_debug_handler = logging.FileHandler(filename=file_debug_name)
-        file_debug_handler.setFormatter(logging.Formatter("[%(asctime)s, %(threadName)s, %(funcName)s, %(levelname)s] %(message)s"))
-        file_debug_handler.setLevel(logging.DEBUG)
-        logger.addHandler(file_debug_handler)
+        if szalai_strategy_config.LOG_DEBUG_DATA:
+            file_debug_name = f"szalai_strategy_debug_{datetime.now().strftime('%Y%m%d_%H%M')}.log"
+            file_debug_handler = logging.FileHandler(filename=file_debug_name)
+            file_debug_handler.setFormatter(logging.Formatter("[%(asctime)s, %(threadName)s, %(funcName)s, %(levelname)s] %(message)s"))
+            file_debug_handler.setLevel(logging.DEBUG)
+            handlers.append(file_debug_handler)
 
         # File handler for kline data logs
-        file_kline_data_name = f"szalai_strategy_kline_data_{datetime.now().strftime('%Y%m%d_%H%M')}.log"
-        file_kline_data_handler = logging.FileHandler(filename=file_kline_data_name)
-        file_kline_data_handler.setFormatter(logging.Formatter("[%(asctime)s, %(threadName)s, %(funcName)s, %(levelname)s] %(message)s"))
-        file_kline_data_handler.setLevel(KLINE_DATA)
+        if szalai_strategy_config.LOG_KLINE_DATA:
+            file_kline_data_name = f"szalai_strategy_kline_data_{datetime.now().strftime('%Y%m%d_%H%M')}.log"
+            file_kline_data_handler = logging.FileHandler(filename=file_kline_data_name)
+            file_kline_data_handler.setFormatter(logging.Formatter("[%(asctime)s, %(threadName)s, %(funcName)s, %(levelname)s] %(message)s"))
+            file_kline_data_handler.setLevel(KLINE_DATA)
 
-        # Add a filter to only include KLINE_DATA level messages
-        class KlineDataFilter(logging.Filter):
-            def filter(self, record):
-                return record.levelno == KLINE_DATA  # Only log messages exactly at KLINE_DATA level
+            # Add a filter to only include KLINE_DATA level messages
+            class KlineDataFilter(logging.Filter):
+                def filter(self, record):
+                    return record.levelno == KLINE_DATA  # Only log messages exactly at KLINE_DATA level
 
-        file_kline_data_handler.addFilter(KlineDataFilter())
-        logger.addHandler(file_kline_data_handler)
+            file_kline_data_handler.addFilter(KlineDataFilter())
+            handlers.append(file_kline_data_handler)
+
+        # Start the queue listener in a background thread
+        self.queue_listener = QueueListener(
+            log_queue, 
+            *handlers,
+            respect_handler_level=True
+          )
+        self.queue_listener.start()  
 
         return logger
