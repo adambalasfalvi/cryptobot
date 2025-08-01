@@ -39,11 +39,14 @@ RETRY_INTERVAL = 5
 # Logging precision for displaying floating-point numbers
 LOGGING_PRECISION = 4
 
+# Enable or disable debug mode for the strategy
+LOG_DEBUG_DATA = False
+
 # Trigger time offset in milliseconds for the strategy
-TRIGGER_TIME_OFFSET = 700
+TRIGGER_TIME_OFFSET = 10
 
 # Enable or disable logging of kline data
-LOG_KLINE_DATA = True
+LOG_KLINE_DATA = False
 
 # Reverse the first order side of the strategy
 REVERSE_FIRST_ORDER_SIDE = False

@@ -8,7 +8,7 @@ from logging import Logger
 from binance import Client
 from binance import enums
 from typing import Optional
-from configs import binance_config
+from configs import binance_config, szalai_strategy_config
 from models.order_response import OrderResponse
 
 # Apply nest_asyncio to allow nested event loops
@@ -27,6 +27,21 @@ class BinanceClientManager():
         self.logger = logger
         self.client = Client(binance_config.API_KEY, binance_config.API_SECRET, testnet=binance_config.TESTNET)
 
+    def futures_ping_server(self) -> None:
+        """Pings the Binance server to check connectivity.
+
+        Returns:
+            None: This method does not return any value.
+        """
+        try:
+            self.client.ping()
+
+            if szalai_strategy_config.LOG_DEBUG_DATA:
+                self.logger.debug("Ping to Binance server was successful.")
+
+        except Exception as e:
+            self.logger.error(f"Error pinging Binance server: {str(e)}")
+
     def futures_get_exchange_info(self) -> dict:
         """Gets the exchange information for the Binance futures market.
 
@@ -34,7 +49,10 @@ class BinanceClientManager():
             dict: Exchange information for the Binance futures market.
         """
         response = self.client.futures_exchange_info()
-        self.logger.debug("Exchange information has been retrieved.")
+
+        if szalai_strategy_config.LOG_DEBUG_DATA:
+            self.logger.debug("Exchange information has been retrieved.")
+
         return response
 
     def futures_get_current_all_open_orders(self, symbol: str) -> dict:
@@ -47,7 +65,9 @@ class BinanceClientManager():
         Returns:
             dict: A dictionary containing details of all open orders for the specified symbol.
         """
-        self.logger.debug(f"Getting all open orders for {symbol}.")
+        if szalai_strategy_config.LOG_DEBUG_DATA:
+            self.logger.debug(f"Getting all open orders for {symbol}.")
+
         response = self.client.futures_get_open_orders(symbol=symbol)
         return response
 
@@ -61,13 +81,16 @@ class BinanceClientManager():
 
         try:
             symbol_information = next(symbol_info for symbol_info in response["symbols"] if symbol_info["symbol"] == symbol)
-            self.logger.debug(
-                f"Symbol information, symbol: {symbol}, "
-                f"pricePrecision: {symbol_information["pricePrecision"]}, "
-                f"quantityPrecision: {symbol_information["quantityPrecision"]} "
-                f"baseAssetPrecision: {symbol_information["baseAssetPrecision"]}, "
-                f"quotePrecision: {symbol_information["quotePrecision"]}."
-            )
+
+            if szalai_strategy_config.LOG_DEBUG_DATA:
+                self.logger.debug(
+                    f"Symbol information, symbol: {symbol}, "
+                    f"pricePrecision: {symbol_information["pricePrecision"]}, "
+                    f"quantityPrecision: {symbol_information["quantityPrecision"]} "
+                    f"baseAssetPrecision: {symbol_information["baseAssetPrecision"]}, "
+                    f"quotePrecision: {symbol_information["quotePrecision"]}."
+                )
+
             return {
                 "symbol": symbol,
                 "pricePrecision": symbol_information["pricePrecision"],
@@ -77,7 +100,10 @@ class BinanceClientManager():
             }
         except StopIteration as e:
             self.logger.error(f"Error while getting symbol precision information, {str(e)}")
-            self.logger.debug("Error while getting symbol precision information:", exc_info=True)
+
+            if szalai_strategy_config.LOG_DEBUG_DATA:
+                self.logger.debug("Error while getting symbol precision information:", exc_info=True)
+            
             return {}
     
     def futures_get_server_time(self) -> datetime:
@@ -88,7 +114,10 @@ class BinanceClientManager():
         """
         response = self.client.futures_time()
         server_time = datetime.fromtimestamp(response["serverTime"]/1000)
-        self.logger.debug(f"Server time is {server_time}.")
+
+        if szalai_strategy_config.LOG_DEBUG_DATA:
+            self.logger.debug(f"Server time is {server_time}.")
+
         return server_time
     
     def futures_create_buy_market_order(self, symbol: str, quantity: float) -> OrderResponse:
@@ -101,7 +130,9 @@ class BinanceClientManager():
         Returns:
             OrderResponse: Response object containing order details.
         """
-        self.logger.debug(f"Creating buy market order, symbol: {symbol}, quantity: {quantity}.")
+        if szalai_strategy_config.LOG_DEBUG_DATA:
+            self.logger.debug(f"Creating buy market order, symbol: {symbol}, quantity: {quantity}.")
+        
         response = self.client.futures_create_order(
             symbol=symbol, 
             side=enums.SIDE_BUY, 
@@ -133,7 +164,9 @@ class BinanceClientManager():
         Returns:
             OrderResponse: Response object containing order details.
         """
-        self.logger.debug(f"Creating sell market order, symbol: {symbol}, quantity: {quantity}.")
+        if szalai_strategy_config.LOG_DEBUG_DATA:
+            self.logger.debug(f"Creating sell market order, symbol: {symbol}, quantity: {quantity}.")
+        
         response = self.client.futures_create_order(
             symbol=symbol, 
             side=enums.SIDE_SELL, 
@@ -165,7 +198,9 @@ class BinanceClientManager():
         Returns:
             OrderResponse: Response object containing order details.
         """
-        self.logger.debug(f"Creating buy stop market order, symbol: {symbol}, stop_price: {stop_price}.")
+        if szalai_strategy_config.LOG_DEBUG_DATA:
+            self.logger.debug(f"Creating buy stop market order, symbol: {symbol}, stop_price: {stop_price}.")
+        
         response = self.client.futures_create_order(
             symbol=symbol, 
             side=enums.SIDE_BUY, 
@@ -197,7 +232,9 @@ class BinanceClientManager():
         Returns:
             OrderResponse: Response object containing order details.
         """
-        self.logger.debug(f"Creating sell stop market order, symbol: {symbol}, stop_price: {stop_price}.")
+        if szalai_strategy_config.LOG_DEBUG_DATA:
+            self.logger.debug(f"Creating sell stop market order, symbol: {symbol}, stop_price: {stop_price}.")
+        
         response = self.client.futures_create_order(
             symbol=symbol, 
             side=enums.SIDE_SELL, 
@@ -229,7 +266,9 @@ class BinanceClientManager():
         Returns:
             OrderResponse: Response object containing order details.
         """
-        self.logger.debug(f"Creating buy take profit market order, symbol: {symbol}, stop_price: {stop_price}.")
+        if szalai_strategy_config.LOG_DEBUG_DATA:
+            self.logger.debug(f"Creating buy take profit market order, symbol: {symbol}, stop_price: {stop_price}.")
+        
         response = self.client.futures_create_order(
             symbol=symbol, 
             side=enums.SIDE_BUY, 
@@ -261,7 +300,9 @@ class BinanceClientManager():
         Returns:
             OrderResponse: Response object containing order details.
         """
-        self.logger.debug(f"Creating sell take profit market order, symbol: {symbol}, stop_price: {stop_price}.")
+        if szalai_strategy_config.LOG_DEBUG_DATA:
+            self.logger.debug(f"Creating sell take profit market order, symbol: {symbol}, stop_price: {stop_price}.")
+        
         response = self.client.futures_create_order(
             symbol=symbol, 
             side=enums.SIDE_SELL, 
@@ -294,7 +335,10 @@ class BinanceClientManager():
             dict: Response from the cancel order request.
         """
         response = self.client.futures_cancel_order(symbol=symbol, origClientOrderId=order_id)
-        self.logger.debug(f"Order {order_id} for symbol {symbol} has been cancelled.")
+
+        if szalai_strategy_config.LOG_DEBUG_DATA:
+            self.logger.debug(f"Order {order_id} for symbol {symbol} has been cancelled.")
+        
         return response
     
     def futures_cancel_all_open_orders(self, symbol: str) -> dict:
@@ -307,7 +351,10 @@ class BinanceClientManager():
             dict: Response from the cancel order request.
         """
         response = self.client.futures_cancel_all_open_orders(symbol=symbol)
-        self.logger.debug(f"All open future orders for symbol {symbol} have been cancelled.")
+
+        if szalai_strategy_config.LOG_DEBUG_DATA:
+            self.logger.debug(f"All open future orders for symbol {symbol} have been cancelled.")
+        
         return response
         
     def futures_change_leverage(self, symbol: str, leverage: int) -> dict:
@@ -321,7 +368,10 @@ class BinanceClientManager():
             str: Response from the change leverage request.
         """
         response = self.client.futures_change_leverage(symbol=symbol, leverage=leverage)
-        self.logger.debug(f"Leverage has been changed to {leverage} for {symbol}.")
+
+        if szalai_strategy_config.LOG_DEBUG_DATA:
+            self.logger.debug(f"Leverage has been changed to {leverage} for {symbol}.")
+        
         return response
 
     def futures_get_account_balance(self, currency: str) -> float:
@@ -333,7 +383,9 @@ class BinanceClientManager():
         Returns:
             float: Account balance for the specified currency, or -1 if currency not found.
         """
-        self.logger.debug(f"Getting {currency} account balance.")
+        if szalai_strategy_config.LOG_DEBUG_DATA:
+            self.logger.debug(f"Getting {currency} account balance.")
+        
         accounts = self.client.futures_account_balance()
         account = next(filter(lambda x: x["asset"] == currency, accounts), None)
         
@@ -341,8 +393,10 @@ class BinanceClientManager():
             balance = -1
         else:
             balance = float(account["balance"])
-            
-        self.logger.debug(f"Balance is {balance} {currency}.")
+
+        if szalai_strategy_config.LOG_DEBUG_DATA:    
+            self.logger.debug(f"Balance is {balance} {currency}.")
+        
         return balance
     
     def futures_get_position_information(self, symbol: str) -> dict:
@@ -354,7 +408,9 @@ class BinanceClientManager():
         Returns:
             str: Position information for the specified symbol.
         """
-        self.logger.debug(f"Getting asset balance for {symbol}.")
+        if szalai_strategy_config.LOG_DEBUG_DATA:
+            self.logger.debug(f"Getting position information for {symbol}.")
+        
         response = self.client.futures_position_information(symbol=symbol)
         return response
     
@@ -367,10 +423,15 @@ class BinanceClientManager():
         Returns:
             float: Latest price for the specified symbol.
         """
-        self.logger.debug(f"Getting latest price for {symbol}.")
+        if szalai_strategy_config.LOG_DEBUG_DATA:
+            self.logger.debug(f"Getting latest price for {symbol}.")
+        
         response = self.client.futures_symbol_ticker(symbol=symbol)
         latest_price = float(response["price"])
-        self.logger.debug(f"Latest price for {symbol} is {latest_price}.")
+
+        if szalai_strategy_config.LOG_DEBUG_DATA:
+            self.logger.debug(f"Latest price for {symbol} is {latest_price}.")
+        
         return latest_price
     
     async def async_futures_get_kline_data(self, symbol: str, interval: str, limit: int, session: aiohttp.ClientSession, startTime: Optional[datetime] = None, endTime: Optional[datetime] = None) -> list:
@@ -403,7 +464,8 @@ class BinanceClientManager():
             end_timestamp = int(endTime.timestamp() * 1000)
             url += f"&endTime={end_timestamp}"
 
-        self.logger.debug(f"Getting kline data for {symbol} symbol, interval: {interval}, limit: {limit}, url: {url}.")
+        if szalai_strategy_config.LOG_DEBUG_DATA:
+            self.logger.debug(f"Getting kline data for {symbol} symbol, interval: {interval}, limit: {limit}, url: {url}.")
         
         async with session.get(url) as response:
             if response.status == 200:
@@ -443,7 +505,8 @@ class BinanceClientManager():
             "X-MBX-APIKEY": binance_config.API_KEY
         }
 
-        self.logger.debug(f"Creating buy market order, symbol: {symbol}, quantity: {quantity}, url: {url}.")
+        if szalai_strategy_config.LOG_DEBUG_DATA:
+            self.logger.debug(f"Creating buy market order, symbol: {symbol}, quantity: {quantity}, url: {url}.")
 
         async with session.post(url, headers=headers) as response:
             if response.status == 200:
@@ -494,7 +557,8 @@ class BinanceClientManager():
             "X-MBX-APIKEY": binance_config.API_KEY
         }
 
-        self.logger.debug(f"Creating sell market order, symbol: {symbol}, quantity: {quantity}, url: {url}.")
+        if szalai_strategy_config.LOG_DEBUG_DATA:
+            self.logger.debug(f"Creating sell market order, symbol: {symbol}, quantity: {quantity}, url: {url}.")
 
         async with session.post(url, headers=headers) as response:
             if response.status == 200:
@@ -545,7 +609,8 @@ class BinanceClientManager():
             "X-MBX-APIKEY": binance_config.API_KEY
         }
 
-        self.logger.debug(f"Creating buy take profit market order, symbol: {symbol}, stop_price: {numpy.format_float_positional(stop_price)}, url: {url}.")
+        if szalai_strategy_config.LOG_DEBUG_DATA:
+            self.logger.debug(f"Creating buy take profit market order, symbol: {symbol}, stop_price: {numpy.format_float_positional(stop_price)}, url: {url}.")
 
         async with session.post(url, headers=headers) as response:
             if response.status == 200:
@@ -596,7 +661,8 @@ class BinanceClientManager():
             "X-MBX-APIKEY": binance_config.API_KEY
         }
 
-        self.logger.debug(f"Creating sell take profit market order, symbol: {symbol}, stop_price: {numpy.format_float_positional(stop_price)}, url: {url}.")
+        if szalai_strategy_config.LOG_DEBUG_DATA:
+            self.logger.debug(f"Creating sell take profit market order, symbol: {symbol}, stop_price: {numpy.format_float_positional(stop_price)}, url: {url}.")
 
         async with session.post(url, headers=headers) as response:
             if response.status == 200:
@@ -647,7 +713,8 @@ class BinanceClientManager():
             "X-MBX-APIKEY": binance_config.API_KEY
         }
 
-        self.logger.debug(f"Creating buy stop market order, symbol: {symbol}, stop_price: {numpy.format_float_positional(stop_price)}, url: {url}.")
+        if szalai_strategy_config.LOG_DEBUG_DATA:
+            self.logger.debug(f"Creating buy stop market order, symbol: {symbol}, stop_price: {numpy.format_float_positional(stop_price)}, url: {url}.")
 
         async with session.post(url, headers=headers) as response:
             if response.status == 200:
@@ -698,7 +765,8 @@ class BinanceClientManager():
             "X-MBX-APIKEY": binance_config.API_KEY
         }
 
-        self.logger.debug(f"Creating sell stop market order, symbol: {symbol}, stop_price: {numpy.format_float_positional(stop_price)}, url: {url}.")
+        if szalai_strategy_config.LOG_DEBUG_DATA:
+            self.logger.debug(f"Creating sell stop market order, symbol: {symbol}, stop_price: {numpy.format_float_positional(stop_price)}, url: {url}.")
 
         async with session.post(url, headers=headers) as response:
             if response.status == 200:

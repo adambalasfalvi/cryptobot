@@ -1,3 +1,4 @@
+from configs import szalai_strategy_config
 from logging import Logger
 from binance import ThreadedWebsocketManager
 from collections.abc import Callable
@@ -24,7 +25,10 @@ class BinanceWebsocketManager:
             callback (Callable): The callback function to handle the websocket data.
         """
         streams: list[str] = [f"{symbol.lower()}@kline_{kline_interval}" for symbol in symbols]
-        self.logger.debug(f"Setting up futures websockets, streams: {', '.join(streams)}, callback: {callback.__name__}.")
+
+        if szalai_strategy_config.LOG_DEBUG_DATA:
+            self.logger.debug(f"Setting up futures websockets, streams: {', '.join(streams)}, callback: {callback.__name__}.")
+        
         self.twm.start_futures_multiplex_socket(callback=callback, streams=streams)
 
     def setup_user_data_websocket(self, callback: Callable) -> None:
@@ -33,17 +37,23 @@ class BinanceWebsocketManager:
         Args:
             callback (Callable): The callback function to handle the websocket data.
         """
-        self.logger.debug(f"Setting up futures user socket, callback: {callback.__name__}.")
+        if szalai_strategy_config.LOG_DEBUG_DATA:
+            self.logger.debug(f"Setting up futures user socket, callback: {callback.__name__}.")
+        
         self.twm.start_futures_user_socket(callback=callback)
     
     def start_websocket(self) -> None:
         """Starts the websocket manager."""
-        self.logger.debug("Starting BinanceWebsocketManager.")
+        if szalai_strategy_config.LOG_DEBUG_DATA:
+            self.logger.debug("Starting BinanceWebsocketManager.")
+            
         self.twm.start()
 
     def stop_websocket(self) -> None:
         """Stops the websocket manager."""
-        self.logger.debug("Stopping BinanceWebsocketManager.")
+        if szalai_strategy_config.LOG_DEBUG_DATA:
+            self.logger.debug("Stopping BinanceWebsocketManager.")
+
         self.twm.stop()
 
         

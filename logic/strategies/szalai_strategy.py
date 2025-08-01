@@ -1,14 +1,18 @@
+import queue
 import sys
 import logging
 import time
 import threading
 import asyncio
+from typing import Optional
 import aiohttp
 import traceback
 from attr import has
+import traceback
 import numpy
 from datetime import datetime
 from logging import Logger
+from logging.handlers import QueueHandler, QueueListener
 from concurrent.futures import ThreadPoolExecutor
 from models.order_error_code import OrderErrorCode
 from models.order_response import OrderResponse
@@ -65,6 +69,7 @@ class SzalaiStrategy:
         self.trading_symbol_stop_loss_order : OrderResponse
         self.interval_trigger_thread: threading.Thread
         self.session: aiohttp.ClientSession
+        self.queue_listener: Optional[QueueListener]
 
     async def start_strategy(self) -> None:
         # Initialize the strategy
@@ -101,6 +106,10 @@ class SzalaiStrategy:
             self.logger.debug("Closing aiohttp session.")
             await self.session.close()
 
+        # Stop the queue listener if it exists
+        if self.queue_listener:
+            self.queue_listener.stop()
+
         self.logger.info("Szalai strategy has stopped.")
     
     async def _init_strategy(self) -> None:
@@ -127,7 +136,9 @@ class SzalaiStrategy:
                 executor.submit(self.client_manager.futures_change_leverage, symbol, szalai_strategy_config.LEVERAGE)
         
         # Start the interval trigger thread
-        self.interval_trigger_thread = threading.Thread(target=self._set_interval_trigger)
+        self.interval_trigger_thread = threading.Thread(
+            target=self._set_interval_trigger,
+            name="IntervalTriggerThread")
         self.interval_trigger_thread.start()
 
         # Start the WebSocket manager to receive real-time updates for market data and user data
@@ -211,7 +222,10 @@ class SzalaiStrategy:
                         pass
                     case State.CONNECTION_RESTORED:
                         open_orders = self._what_orders_are_open(self.trading_symbol)
-                        if len(open_orders) != 0 or len(open_orders) != 2:
+                        if len(open_orders) == 0:
+                            self.logger.info("Updating state to NO_TRADE.")
+                            self.state = State.NO_TRADE
+                        elif len(open_orders) != 2:
                             self._cancel_open_orders_for_symbol(self.trading_symbol)
                             self.logger.info("Updating state to TAKING_POSITION_AND_ORDERS.")
                             self.state = State.TAKING_POSITION_AND_ORDERS
@@ -274,7 +288,9 @@ class SzalaiStrategy:
     
     def _get_precision_information_for_symbols(self) -> None:
         """Get precision information for all symbols concurrently."""
-        with ThreadPoolExecutor(max_workers=len(szalai_strategy_config.TRADE_SYMBOLS)) as executor:
+        with ThreadPoolExecutor(
+            max_workers=len(szalai_strategy_config.TRADE_SYMBOLS)
+        ) as executor:
             for symbol_precision_info in executor.map(self.client_manager.futures_get_symbol_precision_info, szalai_strategy_config.TRADE_SYMBOLS):   
                 self.symbol_info_list.append(
                     Symbol(
@@ -295,22 +311,28 @@ class SzalaiStrategy:
                 # Sync OS time
                 self._sync_os_time()
 
-                # Get the server time from Binance
-                server_time = self.client_manager.futures_get_server_time()
+                # Ping the server
+                self.client_manager.futures_ping_server()
 
-                # Only set the state to CONNECTION_RESTORED if the current state is CONNECTION_LOST
+                # If the ping was successful, set the state to CONNECTION_RESTORED if the current state is CONNECTION_LOST
                 with self.state_lock:
                     if self.state == State.CONNECTION_LOST:
                         self.logger.info("Connection restored. Updating state to CONNECTION_RESTORED.")
                         self.state = State.CONNECTION_RESTORED
+                
+                # Get the server time from Binance
+                server_time = self.client_manager.futures_get_server_time()
 
+                # Calculate the next trigger time
                 trigger_time = self._calculate_trigger_time(server_time)
                 time_to_sleep = (trigger_time - server_time).total_seconds()
-                self.logger.debug(f"Time to sleep: {time_to_sleep} seconds.")
+
+                if szalai_strategy_config.LOG_DEBUG_DATA:
+                    self.logger.debug(f"Time to sleep: {time_to_sleep} seconds.")
 
                 # Sleep until the next trigger time
                 if time_to_sleep > 0:
-                    time.sleep(time_to_sleep)
+                    self._precise_sleep_until(trigger_time)
 
                 if self.stop_event.is_set():
                     break
@@ -324,7 +346,9 @@ class SzalaiStrategy:
                 self.logger.info(f"The configured {self.interval.value} interval has been triggered.")
             
             except Exception as e:
-                self.logger.debug(f"Error during interval trigger: {type(e).__name__}: {e}\n{traceback.format_exc()}")
+                if szalai_strategy_config.LOG_DEBUG_DATA:
+                    self.logger.debug(f"Error during interval trigger: {type(e).__name__}: {e}\n{traceback.format_exc()}")
+
                 self.logger.error(f"Connection has failed during interval trigger, retrying in {szalai_strategy_config.RETRY_INTERVAL} seconds.")
                 with self.state_lock:
                     if self.state != State.CONNECTION_LOST:
@@ -346,6 +370,21 @@ class SzalaiStrategy:
         next_trigger = self.interval.get_trigger_time(server_time, offset_ms)
         self.logger.info(f"Next trigger is set to {next_trigger}.")
         return next_trigger
+    
+    def _precise_sleep_until(self, target_time: datetime) -> None:
+        """Sleep with higher precision until target time."""
+        while True:
+            current_time = datetime.now()
+            time_diff = (target_time - current_time).total_seconds()
+            
+            if time_diff <= 0:
+                break
+                
+            # Use shorter sleeps for the last 100ms for better precision
+            if time_diff > 0.1:
+                time.sleep(time_diff - 0.05)  # Sleep most of the time, leave 50ms buffer
+            else:
+                time.sleep(0.001)  # 1ms precision sleep for final adjustment
 
     def _sync_os_time(self) -> None:
         """
@@ -355,7 +394,10 @@ class SzalaiStrategy:
         It logs the result of the synchronization attempt.
         """
         if sys.platform == "win32":
-            self.logger.debug("Synchronizing OS time on Windows.")
+
+            if szalai_strategy_config.LOG_DEBUG_DATA:
+                self.logger.debug("Synchronizing OS time on Windows.")
+
             try:
                 import subprocess
                 result = subprocess.run(
@@ -385,20 +427,27 @@ class SzalaiStrategy:
         Returns:
             list[OrderResponse]: A list of open orders for the trading symbol.
         """
-        self.logger.debug(f"Checking what orders are open for symbol {symbol}.")
+
+        if szalai_strategy_config.LOG_DEBUG_DATA:
+            self.logger.debug(f"Checking what orders are open for symbol {symbol}.")
 
         # Check if the trading_symbol_take_profit_order and trading_symbol_stop_loss_order attributes exist
         if hasattr(self, 'trading_symbol_take_profit_order') and hasattr(self, 'trading_symbol_stop_loss_order'):
-
             # Get the orders from the strategy
             saved_symbol_orders = [self.trading_symbol_take_profit_order, self.trading_symbol_stop_loss_order]
             # Get all open orders for the symbol from exchange
             exchange_symbol_orders = self.client_manager.futures_get_current_all_open_orders(symbol)
             # Filter the saved orders to include only those that are still open
             open_orders = [order for order in saved_symbol_orders if order.client_order_id in [order["clientOrderId"] for order in exchange_symbol_orders]]
-            self.logger.debug(f"Symbol {symbol} has the following open order(s): {open_orders}.")
+
+            if szalai_strategy_config.LOG_DEBUG_DATA:
+                self.logger.debug(f"Symbol {symbol} has the following open order(s): {open_orders}.")
+
             return open_orders
         
+        if szalai_strategy_config.LOG_DEBUG_DATA:
+            self.logger.debug(f"No open orders found for symbol {symbol}.")
+
         return []
 
     def _is_balance_change_limit_reached(self) -> bool:
@@ -463,7 +512,8 @@ class SzalaiStrategy:
         # the time difference for each interval type
         start_time = end_time - self.interval.timedelta
         
-        self.logger.debug(f"Fetching kline data with start time: {start_time}, end time: {end_time}")
+        if szalai_strategy_config.LOG_DEBUG_DATA:
+            self.logger.debug(f"Fetching kline data with start time: {start_time}, end time: {end_time}")
 
         tasks = [
             self.client_manager.async_futures_get_kline_data(
@@ -641,7 +691,7 @@ class SzalaiStrategy:
 
     def _close_open_positions_and_cancel_orders_for_all_symbols(self) -> None:
         """
-        Closes open positions and cancels all orders for all symbols.
+        Closes open positions and cancels all orders for all symbols listed in the configuration.
 
         This method iterates through each trading symbol and:
         - Cancels all open orders
@@ -682,7 +732,9 @@ class SzalaiStrategy:
         This method processes order trade updates, adjusts the status of existing orders, and
         sets flags for checking profit and orders as necessary.
         """
-        self.logger.debug(f"Trade update, message: {message}.")
+        if szalai_strategy_config.LOG_DEBUG_DATA:
+            self.logger.debug(f"Trade update, message: {message}.")
+
         event_type = message.get("e")
         client_order_id = message.get("o", {}).get("c", None)
 
@@ -690,7 +742,9 @@ class SzalaiStrategy:
             status = message.get("o", {}).get("X", None)
             order = next(order for order in self.order_list if order.client_order_id == client_order_id)
             order.status = status
-            self.logger.debug(f"Order has been updated, {order}.")
+
+            if szalai_strategy_config.LOG_DEBUG_DATA:
+                self.logger.debug(f"Order has been updated, {order}.")
             
             with self.state_lock:
                 if order.type == "TAKE_PROFIT_MARKET" and order.status == "FILLED":
@@ -706,7 +760,8 @@ class SzalaiStrategy:
                     return
 
                 if (order.type in ["STOP_MARKET", "TAKE_PROFIT_MARKET"]) and order.status == "CANCELED":
-                    self.logger.debug(f"{order.type} order has been canceled.")
+                    if szalai_strategy_config.LOG_DEBUG_DATA:
+                        self.logger.debug(f"{order.type} order has been canceled.")
 
     async def _create_position_order(self, symbol: str, quantity: float, side: Side, session: aiohttp.ClientSession) -> OrderResponse:
         """
@@ -768,12 +823,17 @@ class SzalaiStrategy:
         This method adjusts the price according to the take profit multiplier configured in
         the strategy configuration.
         """
-        self.logger.debug(f"Calculating take profit price, price: {numpy.format_float_positional(price)}, side: {side.name}.")
+        if szalai_strategy_config.LOG_DEBUG_DATA:
+            self.logger.debug(f"Calculating take profit price, price: {numpy.format_float_positional(price)}, side: {side.name}.")
+
         if side == Side.LONG:
             tp_price = price + (price * szalai_strategy_config.TAKE_PROFIT_MULTIPLIER.decimal_value)
         else:
             tp_price = price - (price * szalai_strategy_config.TAKE_PROFIT_MULTIPLIER.decimal_value)
-        self.logger.debug(f"Take profit price is {numpy.format_float_positional(tp_price)}.")
+
+        if szalai_strategy_config.LOG_DEBUG_DATA:    
+            self.logger.debug(f"Take profit price is {numpy.format_float_positional(tp_price)}.")
+
         return tp_price
 
     def _calculate_stop_loss_price(self, price: float, side: Side) -> float:
@@ -783,12 +843,17 @@ class SzalaiStrategy:
         This method adjusts the price according to the stop loss multiplier configured in
         the strategy configuration.
         """
-        self.logger.debug(f"Calculating stop loss price, price: {numpy.format_float_positional(price)}, side: {side.name}.")
+        if szalai_strategy_config.LOG_DEBUG_DATA:
+            self.logger.debug(f"Calculating stop loss price, price: {numpy.format_float_positional(price)}, side: {side.name}.")
+        
         if side == Side.LONG:
             sl_price = price - (price * szalai_strategy_config.STOP_LOSS_MULTIPLIER.decimal_value)
         else:
             sl_price = price + (price * szalai_strategy_config.STOP_LOSS_MULTIPLIER.decimal_value)
-        self.logger.debug(f"Stop loss price is {numpy.format_float_positional(sl_price)}.")
+
+        if szalai_strategy_config.LOG_DEBUG_DATA:    
+            self.logger.debug(f"Stop loss price is {numpy.format_float_positional(sl_price)}.")
+
         return sl_price
 
     def _init_logger(self) -> Logger:
@@ -812,41 +877,62 @@ class SzalaiStrategy:
         # Add the method to the Logger class
         setattr(logging.Logger, 'kline_data', kline_data)
 
+        # Create a queue for log messages (this makes logging non-blocking)
+        log_queue = queue.Queue(maxsize=10000)
+
+        # Create the main logger
         logger = logging.getLogger(__name__)
         logger.setLevel(logging.DEBUG)
+
+        # Create a queue handler to handle log messages asynchronously
+        queue_handler = QueueHandler(log_queue)
+        logger.addHandler(queue_handler)
+
+        # Create actual handlers (these will run in background thread)
+        handlers = []
 
         # Console handler for info level logs
         console_handler = logging.StreamHandler(stream=sys.stdout)
         console_handler.setLevel(logging.INFO)
-        console_handler.setFormatter(logging.Formatter("[%(asctime)s, %(levelname)s] %(message)s"))
-        logger.addHandler(console_handler)
+        console_handler.setFormatter(logging.Formatter("[%(asctime)s, %(threadName)s, %(levelname)s] %(message)s"))
+        handlers.append(console_handler)
 
         # File handler for info level logs
         file_info_name = f"szalai_strategy_{datetime.now().strftime('%Y%m%d_%H%M')}.log"
         file_info_handler = logging.FileHandler(filename=file_info_name)
-        file_info_handler.setFormatter(logging.Formatter("[%(asctime)s, %(levelname)s] %(message)s"))
+        file_info_handler.setFormatter(logging.Formatter("[%(asctime)s, %(threadName)s, %(levelname)s] %(message)s"))
         file_info_handler.setLevel(logging.INFO)
-        logger.addHandler(file_info_handler)
+        handlers.append(file_info_handler)
 
         # File handler for debug level logs
-        file_debug_name = f"szalai_strategy_debug_{datetime.now().strftime('%Y%m%d_%H%M')}.log"
-        file_debug_handler = logging.FileHandler(filename=file_debug_name)
-        file_debug_handler.setFormatter(logging.Formatter("[%(asctime)s, %(threadName)s, %(funcName)s, %(levelname)s] %(message)s"))
-        file_debug_handler.setLevel(logging.DEBUG)
-        logger.addHandler(file_debug_handler)
+        if szalai_strategy_config.LOG_DEBUG_DATA:
+            file_debug_name = f"szalai_strategy_debug_{datetime.now().strftime('%Y%m%d_%H%M')}.log"
+            file_debug_handler = logging.FileHandler(filename=file_debug_name)
+            file_debug_handler.setFormatter(logging.Formatter("[%(asctime)s, %(threadName)s, %(funcName)s, %(levelname)s] %(message)s"))
+            file_debug_handler.setLevel(logging.DEBUG)
+            handlers.append(file_debug_handler)
 
         # File handler for kline data logs
-        file_kline_data_name = f"szalai_strategy_kline_data_{datetime.now().strftime('%Y%m%d_%H%M')}.log"
-        file_kline_data_handler = logging.FileHandler(filename=file_kline_data_name)
-        file_kline_data_handler.setFormatter(logging.Formatter("[%(asctime)s, %(threadName)s, %(funcName)s, %(levelname)s] %(message)s"))
-        file_kline_data_handler.setLevel(KLINE_DATA)
+        if szalai_strategy_config.LOG_KLINE_DATA:
+            file_kline_data_name = f"szalai_strategy_kline_data_{datetime.now().strftime('%Y%m%d_%H%M')}.log"
+            file_kline_data_handler = logging.FileHandler(filename=file_kline_data_name)
+            file_kline_data_handler.setFormatter(logging.Formatter("[%(asctime)s, %(threadName)s, %(funcName)s, %(levelname)s] %(message)s"))
+            file_kline_data_handler.setLevel(KLINE_DATA)
 
-        # Add a filter to only include KLINE_DATA level messages
-        class KlineDataFilter(logging.Filter):
-            def filter(self, record):
-                return record.levelno == KLINE_DATA  # Only log messages exactly at KLINE_DATA level
+            # Add a filter to only include KLINE_DATA level messages
+            class KlineDataFilter(logging.Filter):
+                def filter(self, record):
+                    return record.levelno == KLINE_DATA  # Only log messages exactly at KLINE_DATA level
 
-        file_kline_data_handler.addFilter(KlineDataFilter())
-        logger.addHandler(file_kline_data_handler)
+            file_kline_data_handler.addFilter(KlineDataFilter())
+            handlers.append(file_kline_data_handler)
+
+        # Start the queue listener in a background thread
+        self.queue_listener = QueueListener(
+            log_queue, 
+            *handlers,
+            respect_handler_level=True
+          )
+        self.queue_listener.start()  
 
         return logger
