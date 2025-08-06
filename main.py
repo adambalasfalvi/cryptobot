@@ -3,7 +3,7 @@ import asyncio
 import nest_asyncio
 
 # Apply nest_asyncio to allow nested event loops
-nest_asyncio.apply()
+# nest_asyncio.apply()
 
 from logic.strategies.szalai_strategy import SzalaiStrategy
 

@@ -26,6 +26,7 @@ from logic.managers.binance_websocket_manager import BinanceWebsocketManager
 from configs import szalai_strategy_config
 from threading import Event
 from threading import Lock
+from logic.managers.session_manager import SessionManager
 
 class SzalaiStrategy:
     """
@@ -68,7 +69,7 @@ class SzalaiStrategy:
         self.trading_symbol_take_profit_order: OrderResponse
         self.trading_symbol_stop_loss_order : OrderResponse
         self.interval_trigger_thread: threading.Thread
-        self.session: aiohttp.ClientSession
+        self.session_manager = SessionManager(logger=self.logger)
         self.queue_listener: Optional[QueueListener]
 
     async def start_strategy(self) -> None:
@@ -101,10 +102,8 @@ class SzalaiStrategy:
         # Wait for the interval trigger thread to complete
         self.interval_trigger_thread.join()
 
-        # Close the aiohttp session if it exists
-        if self.session and not self.session.closed:
-            self.logger.debug("Closing aiohttp session.")
-            await self.session.close()
+        # Close the session manager
+        await self.session_manager.close_session()
 
         # Stop the queue listener if it exists
         if self.queue_listener:
@@ -117,7 +116,7 @@ class SzalaiStrategy:
         self.logger.info("Starting Szalai strategy.")
 
         # Initialize session
-        self.session = aiohttp.ClientSession()
+        self.session_manager.create_session()
 
         # Check if all symbols exist in Binance
         if not self._check_if_all_symbol_exists_in_binance():
@@ -515,9 +514,12 @@ class SzalaiStrategy:
         if szalai_strategy_config.LOG_DEBUG_DATA:
             self.logger.debug(f"Fetching kline data with start time: {start_time}, end time: {end_time}")
 
+        # Get the optimized session from session manager
+        session = self.session_manager.get_session()
+
         tasks = [
             self.client_manager.async_futures_get_kline_data(
-                kline_data.symbol, self.interval.__str__(), 1, self.session, start_time, end_time
+                kline_data.symbol, self.interval.__str__(), 1, session, start_time, end_time
             ) 
             for kline_data in self.kline_data_list
         ]
@@ -573,18 +575,21 @@ class SzalaiStrategy:
         """
         self.logger.info(f"Setting up orders for symbol {self.trading_symbol}.")
         # TODO: check if there is enough balance to place the order
-        try:
-            
+
+        # Get the optimized session from session manager
+        session = self.session_manager.get_session()
+
+        try:          
             try:
-                self.trading_symbol_position_order = await self._create_position_order(self.trading_symbol, self.trading_symbol_quantity, self.side, self.session)
+                self.trading_symbol_position_order = await self._create_position_order(self.trading_symbol, self.trading_symbol_quantity, self.side, session)
                 self.order_list.extend([self.trading_symbol_position_order])
             except Exception as e:
                 self.logger.error(f"Error creating position order: {e}")
                 return OrderErrorCode.POSITION_ORDER_FAILED
 
             order_results = await asyncio.gather(
-                self._create_take_profit_order(self.trading_symbol, self.trading_symbol_position_order.average_price, self.side, self.session),
-                self._create_stop_loss_order(self.trading_symbol, self.trading_symbol_position_order.average_price, self.side, self.session),
+                self._create_take_profit_order(self.trading_symbol, self.trading_symbol_position_order.average_price, self.side, session),
+                self._create_stop_loss_order(self.trading_symbol, self.trading_symbol_position_order.average_price, self.side, session),
                 return_exceptions=True
             )
 
@@ -628,11 +633,16 @@ class SzalaiStrategy:
         """
         symbol_info_dict = {symbol_info.symbol: symbol_info for symbol_info in self.symbol_info_list}
         quantity_precision = symbol_info_dict[self.trading_symbol_kline_data.symbol].quantity_precision
-        self.trading_symbol_quantity = round(szalai_strategy_config.RISK_USD / self.trading_symbol_kline_data.close_price, quantity_precision)
-        self.logger.info(
+
+        try:
+            self.trading_symbol_quantity = round(szalai_strategy_config.RISK_USD / self.trading_symbol_kline_data.close_price, quantity_precision)
+            self.logger.info(
             f"The calculated quantity of symbol {self.trading_symbol_kline_data.symbol} " 
             f"from {szalai_strategy_config.RISK_USD} USD is {self.trading_symbol_quantity}."
         )
+        except ZeroDivisionError:
+            self.logger.error(f"Error calculating quantity for symbol {self.trading_symbol_kline_data.symbol}: Division by zero.")
+            self.trading_symbol_quantity = 0.0
 
     def _close_open_position_for_symbol(self, symbol: str) -> None:
         """

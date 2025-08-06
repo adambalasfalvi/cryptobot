@@ -12,7 +12,7 @@ from configs import binance_config, szalai_strategy_config
 from models.order_response import OrderResponse
 
 # Apply nest_asyncio to allow nested event loops
-nest_asyncio.apply()
+# nest_asyncio.apply()
 
 class BinanceClientManager():
     """This class manages Binance client operations including creating orders, 
