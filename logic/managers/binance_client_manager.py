@@ -2,7 +2,6 @@ import aiohttp
 import hmac
 import hashlib
 import numpy
-import nest_asyncio
 from datetime import datetime
 from logging import Logger
 from binance import Client
@@ -10,9 +9,6 @@ from binance import enums
 from typing import Optional
 from configs import binance_config, szalai_strategy_config
 from models.order_response import OrderResponse
-
-# Apply nest_asyncio to allow nested event loops
-# nest_asyncio.apply()
 
 class BinanceClientManager():
     """This class manages Binance client operations including creating orders, 
@@ -433,6 +429,104 @@ class BinanceClientManager():
             self.logger.debug(f"Latest price for {symbol} is {latest_price}.")
         
         return latest_price
+    
+    async def async_futures_get_current_all_open_orders(self, symbol: str, session: aiohttp.ClientSession) -> dict:
+        """
+        Asynchronously retrieves all open futures orders for a given symbol.
+
+        Args:
+            symbol (str): Trading symbol.
+            session (aiohttp.ClientSession): Active aiohttp client session for making requests.
+
+        Returns:
+            dict: A dictionary containing details of all open orders for the specified symbol.
+        """
+        if szalai_strategy_config.LOG_DEBUG_DATA:
+            self.logger.debug(f"Getting all open orders for {symbol}.")
+
+        timestamp = int(datetime.now().timestamp() * 1000)
+        
+        url = f"{binance_config.BASE_URL}/fapi/v1/openOrders?symbol={symbol}&timestamp={timestamp}"
+
+        async with session.get(url) as response:
+            if response.status == 200:
+                data = await response.json()
+                return data
+            else:
+                raise Exception(f"Response status is {response.status}, response: {await response.text()}.")
+
+    async def async_futures_get_position_information(self, symbol: str, session: aiohttp.ClientSession) -> dict:
+        """Asynchronously retrieves the position information for a given symbol.
+
+        Args:
+            symbol (str): Trading symbol.
+            session (aiohttp.ClientSession): Active aiohttp client session for making requests.
+
+        Returns:
+            str: Position information for the specified symbol.
+        """
+        if szalai_strategy_config.LOG_DEBUG_DATA:
+            self.logger.debug(f"Getting position information for {symbol}.")
+
+        timestamp = int(datetime.now().timestamp() * 1000)
+
+        url = f"{binance_config.BASE_URL}/fapi/v2/positionRisk?symbol={symbol}&timestamp={timestamp}"
+
+        async with session.get(url) as response:
+            if response.status == 200:
+                data = await response.json()
+                return data
+            else:
+                raise Exception(f"Response status is {response.status}, response: {await response.text()}.")
+
+    async def async_futures_cancel_order(self, symbol: str, order_id: str, session: aiohttp.ClientSession) -> dict:
+        """Asynchronously cancels a specific futures order.
+
+        Args:
+            symbol (str): Trading symbol.
+            order_id (str): Order ID to cancel.
+            session (aiohttp.ClientSession): Active aiohttp client session for making requests.
+
+        Returns:
+            dict: Response from the cancel order request.
+        """
+        url = f"{binance_config.BASE_URL}/fapi/v1/order?symbol={symbol}&origClientOrderId={order_id}"
+
+        async with session.delete(url) as response:
+            if response.status == 200:
+                data = await response.json()
+                return data
+            else:
+                raise Exception(f"Response status is {response.status}, response: {await response.text()}.")
+
+        if szalai_strategy_config.LOG_DEBUG_DATA:
+            self.logger.debug(f"Order {order_id} for symbol {symbol} has been cancelled.")
+        
+        return response
+
+    async def async_futures_cancel_all_open_orders(self, symbol: str, session: aiohttp.ClientSession) -> dict:
+        """Asynchronously cancels all open futures orders for a given symbol.
+
+        Args:
+            symbol (str): Trading symbol.
+            session (aiohttp.ClientSession): Active aiohttp client session for making requests.
+
+        Returns:
+            dict: Response from the cancel order request.
+        """
+        url = f"{binance_config.BASE_URL}/fapi/v1/allOpenOrders?symbol={symbol}"
+
+        async with session.delete(url) as response:
+            if response.status == 200:
+                data = await response.json()
+                return data
+            else:
+                raise Exception(f"Response status is {response.status}, response: {await response.text()}.")
+
+        if szalai_strategy_config.LOG_DEBUG_DATA:
+            self.logger.debug(f"All open future orders for symbol {symbol} have been cancelled.")
+        
+        return response
     
     async def async_futures_get_kline_data(self, symbol: str, interval: str, limit: int, session: aiohttp.ClientSession, startTime: Optional[datetime] = None, endTime: Optional[datetime] = None) -> list:
         """Asynchronously retrieves kline (candlestick) data for a specific symbol.

@@ -9,6 +9,7 @@ class State(Enum):
         NO_TRADE: State when the bot is not actively trading.
         COLLECTING_DATA: State when the bot is collecting market data for analysis.
         TAKING_POSITION_AND_ORDERS: State when the bot is creating position and order entries.
+        ERROR_AT_TAKING_POSITION_AND_ORDERS: State when there was an error while taking position and orders.
         TRADE: State when the bot has active trades and is monitoring them.
         TAKE_PROFIT_ORDER_FILLED: State when a take profit order has been filled.
         STOP_MARKET_ORDER_FILLED: State when a stop market order has been filled.
@@ -20,9 +21,10 @@ class State(Enum):
     NO_TRADE = 1
     COLLECTING_DATA = 2
     TAKING_POSITION_AND_ORDERS = 3
-    TRADE = 4
-    TAKE_PROFIT_ORDER_FILLED = 5
-    STOP_MARKET_ORDER_FILLED = 6
-    CONNECTION_LOST = 7
-    CONNECTION_RESTORED = 8
-    STOPPED = 9
+    ERROR_AT_TAKING_POSITION_AND_ORDERS = 4
+    TRADE = 5
+    TAKE_PROFIT_ORDER_FILLED = 6
+    STOP_MARKET_ORDER_FILLED = 7
+    CONNECTION_LOST = 8
+    CONNECTION_RESTORED = 9
+    STOPPED = 10
