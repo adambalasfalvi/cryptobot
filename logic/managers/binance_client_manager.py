@@ -441,14 +441,26 @@ class BinanceClientManager():
         Returns:
             dict: A dictionary containing details of all open orders for the specified symbol.
         """
+        timestamp = int(datetime.now().timestamp() * 1000)
+
+        query_string = f"symbol={symbol}&timestamp={timestamp}"
+
+        signature = hmac.new(
+            binance_config.API_SECRET.encode('utf-8'),
+            query_string.encode('utf-8'),
+            hashlib.sha256
+        ).hexdigest()
+
+        url = f"{binance_config.BASE_URL}/fapi/v1/openOrders?{query_string}&signature={signature}"
+
+        headers = {
+            "X-MBX-APIKEY": binance_config.API_KEY
+        }
+
         if szalai_strategy_config.LOG_DEBUG_DATA:
             self.logger.debug(f"Getting all open orders for {symbol}.")
 
-        timestamp = int(datetime.now().timestamp() * 1000)
-        
-        url = f"{binance_config.BASE_URL}/fapi/v1/openOrders?symbol={symbol}&timestamp={timestamp}"
-
-        async with session.get(url) as response:
+        async with session.get(url, headers=headers) as response:
             if response.status == 200:
                 data = await response.json()
                 return data
@@ -465,14 +477,30 @@ class BinanceClientManager():
         Returns:
             str: Position information for the specified symbol.
         """
-        if szalai_strategy_config.LOG_DEBUG_DATA:
-            self.logger.debug(f"Getting position information for {symbol}.")
-
+        # Get the current timestamp
         timestamp = int(datetime.now().timestamp() * 1000)
 
-        url = f"{binance_config.BASE_URL}/fapi/v2/positionRisk?symbol={symbol}&timestamp={timestamp}"
+        # Create the query string
+        query_string = f"symbol={symbol}&timestamp={timestamp}"
 
-        async with session.get(url) as response:
+        # Generate the HMAC SHA256 signature
+        signature = hmac.new(
+            binance_config.API_SECRET.encode('utf-8'),
+            query_string.encode('utf-8'),
+            hashlib.sha256
+        ).hexdigest()
+
+        url = f"{binance_config.BASE_URL}/fapi/v2/positionRisk?{query_string}&signature={signature}"
+
+        # Set the headers
+        headers = {
+            "X-MBX-APIKEY": binance_config.API_KEY
+        }
+
+        if szalai_strategy_config.LOG_DEBUG_DATA:
+            self.logger.debug(f"Getting position information for {symbol}, url: {url}.")
+
+        async with session.get(url, headers=headers) as response:
             if response.status == 200:
                 data = await response.json()
                 return data
@@ -490,17 +518,31 @@ class BinanceClientManager():
         Returns:
             dict: Response from the cancel order request.
         """
-        url = f"{binance_config.BASE_URL}/fapi/v1/order?symbol={symbol}&origClientOrderId={order_id}"
+        timestamp = int(datetime.now().timestamp() * 1000)
 
-        async with session.delete(url) as response:
+        query_string = f"symbol={symbol}&origClientOrderId={order_id}&timestamp={timestamp}"
+
+        signature = hmac.new(
+            binance_config.API_SECRET.encode('utf-8'),
+            query_string.encode('utf-8'),
+            hashlib.sha256
+        ).hexdigest()
+
+        url = f"{binance_config.BASE_URL}/fapi/v1/order?{query_string}&signature={signature}"
+
+        headers = {
+            "X-MBX-APIKEY": binance_config.API_KEY
+        }
+
+        if szalai_strategy_config.LOG_DEBUG_DATA:
+            self.logger.debug(f"Cancelling order {order_id} for symbol {symbol}, url: {url}.")
+
+        async with session.delete(url, headers=headers) as response:
             if response.status == 200:
                 data = await response.json()
                 return data
             else:
                 raise Exception(f"Response status is {response.status}, response: {await response.text()}.")
-
-        if szalai_strategy_config.LOG_DEBUG_DATA:
-            self.logger.debug(f"Order {order_id} for symbol {symbol} has been cancelled.")
         
         return response
 
@@ -514,17 +556,31 @@ class BinanceClientManager():
         Returns:
             dict: Response from the cancel order request.
         """
-        url = f"{binance_config.BASE_URL}/fapi/v1/allOpenOrders?symbol={symbol}"
+        timestamp = int(datetime.now().timestamp() * 1000)
 
-        async with session.delete(url) as response:
+        query_string = f"symbol={symbol}&timestamp={timestamp}"
+
+        signature = hmac.new(
+            binance_config.API_SECRET.encode('utf-8'),
+            query_string.encode('utf-8'),
+            hashlib.sha256
+        ).hexdigest()
+
+        url = f"{binance_config.BASE_URL}/fapi/v1/allOpenOrders?{query_string}&signature={signature}"
+
+        headers = {
+            "X-MBX-APIKEY": binance_config.API_KEY
+        }
+
+        if szalai_strategy_config.LOG_DEBUG_DATA:
+            self.logger.debug(f"Cancelling all open orders for symbol {symbol}, url: {url}.")
+
+        async with session.delete(url, headers=headers) as response:
             if response.status == 200:
                 data = await response.json()
                 return data
             else:
                 raise Exception(f"Response status is {response.status}, response: {await response.text()}.")
-
-        if szalai_strategy_config.LOG_DEBUG_DATA:
-            self.logger.debug(f"All open future orders for symbol {symbol} have been cancelled.")
         
         return response
     
@@ -877,5 +933,46 @@ class BinanceClientManager():
                     datetime.fromtimestamp(data["updateTime"]/1000)
                 )
                 return order_response
+            else:
+                raise Exception(f"Response status is {response.status}, response: {await response.text()}.")
+            
+    async def async_futures_get_account_trade_data(self, symbol: str, order_id: int, session: aiohttp.ClientSession) -> dict:
+        """Asynchronously retrieves account trade data for a specific symbol and order ID.
+
+        Args:
+            symbol (str): Trading symbol.
+            order_id (int): Order ID.
+            session (aiohttp.ClientSession): Active aiohttp client session for making requests.
+
+        Returns:
+            dict: Trade data for the specified symbol and order ID.
+        """
+        # Get the current timestamp
+        timestamp = int(datetime.now().timestamp() * 1000)
+
+        # Create the query string
+        query_string = f"symbol={symbol}&orderId={order_id}&timestamp={timestamp}"
+
+        # Generate the HMAC SHA256 signature
+        signature = hmac.new(
+            binance_config.API_SECRET.encode('utf-8'),
+            query_string.encode('utf-8'),
+            hashlib.sha256
+        ).hexdigest()
+
+        url = f"{binance_config.BASE_URL}/fapi/v1/userTrades?{query_string}&signature={signature}"
+
+        # Set the headers
+        headers = {
+            "X-MBX-APIKEY": binance_config.API_KEY
+        }
+
+        if szalai_strategy_config.LOG_DEBUG_DATA:
+            self.logger.debug(f"Getting account trade data for {symbol} symbol, order_id: {order_id}, url: {url}.")
+
+        async with session.get(url, headers=headers) as response:
+            if response.status == 200:
+                data = await response.json()
+                return data
             else:
                 raise Exception(f"Response status is {response.status}, response: {await response.text()}.")

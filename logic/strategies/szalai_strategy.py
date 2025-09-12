@@ -4,6 +4,7 @@ import logging
 import time
 import threading
 import asyncio
+from turtle import up
 from typing import Optional
 import aiohttp
 import traceback
@@ -237,8 +238,8 @@ class SzalaiStrategy:
                             self.state = State.NO_TRADE
                         elif len(open_orders) != 2:
                             await self._cancel_open_orders_for_symbol(self.trading_symbol, self.session_manager.get_session())
-                            self.logger.info("Updating state to TAKING_POSITION_AND_ORDERS.")
-                            self.state = State.TAKING_POSITION_AND_ORDERS
+                            self.logger.info("Updating state to NO_TRADE.")
+                            self.state = State.NO_TRADE
                         else:
                             self.logger.info("Updating state to TRADE.")
                             self.state = State.TRADE
@@ -459,7 +460,11 @@ class SzalaiStrategy:
             self.logger.debug(f"Checking position for symbol {symbol}.")
 
         position_info = await self.client_manager.async_futures_get_position_information(symbol, session)
-        return bool(position_info)
+
+        # Filter out zero amount positions
+        filtered_position_info = [pos for pos in position_info if float(pos["positionAmt"]) != 0.0]
+
+        return bool(filtered_position_info)
 
     async def _what_orders_are_open(self, symbol: str, session: aiohttp.ClientSession) -> list[OrderResponse]:
         """
@@ -740,13 +745,15 @@ class SzalaiStrategy:
         self.logger.info(f"Closing all open positions and orders for {symbol}.")
         
         try:
+            # Execute both tasks concurrently
             await asyncio.gather(
                 self._cancel_open_orders_for_symbol(symbol, session),
                 self._close_open_position_for_symbol(symbol, session),
-                return_exceptions=True
             )
+
         except Exception as e:
             self.logger.error(f"Error closing position and orders for symbol {symbol}: {e}")
+            raise 
 
     async def _close_open_positions_and_cancel_orders_for_all_symbols(self, session: aiohttp.ClientSession) -> None:
         """
@@ -767,18 +774,11 @@ class SzalaiStrategy:
                 tasks.append(self._close_open_position_and_cancel_orders_for_symbol(symbol, session))
 
             # Wait for all tasks to complete
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-
-            # Process the results
-            for i, result in enumerate(results):
-                symbol = szalai_strategy_config.TRADE_SYMBOLS[i]
-                if isinstance(result, Exception):
-                    self.logger.error(f"Error closing position and orders for symbol {symbol}: {result}")
-                elif szalai_strategy_config.LOG_DEBUG_DATA:
-                        self.logger.debug(f"Successfully closed position and orders for symbol {symbol}.")
+            await asyncio.gather(*tasks)
 
         except Exception as e:
             self.logger.error(f"Error closing positions and orders for all symbols: {e}")
+            raise
 
     def _update_order_data_handler(self, message: dict) -> None:
         """
@@ -795,8 +795,11 @@ class SzalaiStrategy:
 
         if event_type == "ORDER_TRADE_UPDATE" and any(order.client_order_id == client_order_id for order in self.order_list):
             status = message.get("o", {}).get("X", None)
+            update_time = message.get("o", {}).get("T", None)
+
             order = next(order for order in self.order_list if order.client_order_id == client_order_id)
             order.status = status
+            order.update_time = update_time
 
             if szalai_strategy_config.LOG_DEBUG_DATA:
                 self.logger.debug(f"Order has been updated, {order}.")

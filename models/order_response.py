@@ -5,7 +5,7 @@ class OrderResponse():
     A class to represent the response from an order placed on the Binance platform.
 
     Attributes:
-        client_order_id (str): The unique identifier for the client order.
+        client_order_id (int): The unique identifier for the client order.
         symbol (str): The trading pair symbol.
         status (str): The current status of the order.
         average_price (float): The average price at which the order was filled.
@@ -18,7 +18,7 @@ class OrderResponse():
 
     def __init__(
             self, 
-            client_order_id: str,  
+            client_order_id: int,  
             symbol: str, 
             status: str,
             average_price: float, 
@@ -31,7 +31,7 @@ class OrderResponse():
         Initializes the OrderResponse object with given parameters.
 
         Args:
-            client_order_id (str): The unique identifier for the client order.
+            client_order_id (int): The unique identifier for the client order.
             symbol (str): The trading pair symbol.
             status (str): The current status of the order.
             average_price (float): The average price at which the order was filled.
