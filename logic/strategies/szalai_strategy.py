@@ -86,29 +86,35 @@ class SzalaiStrategy:
         and orders to halt trading activities.
         """
         self.logger.info("Stopping Szalai strategy...")
+
+        # Set state to STOPPED
         with self.state_lock:
             self.state = State.STOPPED
 
-        # Set the stop event to signal the run_strategy loop to exit
+        # Set the stop event to signal
         self.stop_event.set()
 
         # Stop the WebSocket manager to cease receiving data
         self.websocket_manager.stop_websocket()
 
         # Close all open positions and cancel all orders for all symbols
-        await self._close_open_positions_and_cancel_orders_for_all_symbols(self.session_manager.get_session())
+        async with aiohttp.ClientSession() as session:
+            await self._close_open_positions_and_cancel_orders_for_all_symbols(
+                session=session
+            )
 
-        # Wait for the interval trigger thread to complete
-        self.interval_trigger_thread.join()
+        # Wait 2 seconds for the interval trigger thread to complete
+        self.interval_trigger_thread.join(timeout=2.0)
 
-        # Close the session manager
-        await self.session_manager.close_session()
+        # Not needed anymore, because the  _run_strategy() loop already got cancelled
+        # Close the session
+        # await self.session_manager.close_session()
+
+        self.logger.info("Szalai strategy has stopped.")
 
         # Stop the queue listener if it exists
         if self.queue_listener:
             self.queue_listener.stop()
-
-        self.logger.info("Szalai strategy has stopped.")
     
     async def _init_strategy(self) -> None:
         # Log the start of the strategy execution
@@ -443,6 +449,9 @@ class SzalaiStrategy:
             self.logger.debug(f"Checking open orders for symbol {symbol}.")
 
         open_orders = await self.client_manager.async_futures_get_current_all_open_orders(symbol, session)
+
+        self.logger.info(f"There is {len(open_orders)} open order(s) for symbol {symbol}.")
+
         return bool(open_orders)
 
     async def _check_position_for_symbol(self, symbol: str, session: aiohttp.ClientSession) -> bool:
@@ -463,6 +472,11 @@ class SzalaiStrategy:
 
         # Filter out zero amount positions
         filtered_position_info = [pos for pos in position_info if float(pos["positionAmt"]) != 0.0]
+
+        if filtered_position_info:
+            self.logger.info(f"There is a position for symbol {symbol}.")
+        else:
+            self.logger.info(f"There is no position for symbol {symbol}.")
 
         return bool(filtered_position_info)
 
