@@ -1,11 +1,4 @@
-import sys
 import asyncio
-import nest_asyncio
-
-# Apply nest_asyncio to allow nested event loops
-# nest_asyncio.apply()
-
-from logic.strategies import szalai_strategy
 from logic.strategies.szalai_strategy import SzalaiStrategy
 
 def main():

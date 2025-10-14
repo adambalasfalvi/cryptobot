@@ -4,7 +4,6 @@ import logging
 import time
 import threading
 import asyncio
-from turtle import up
 from typing import Optional
 import aiohttp
 import traceback
@@ -94,9 +93,6 @@ class SzalaiStrategy:
         # Set the stop event to signal
         self.stop_event.set()
 
-        # Stop the WebSocket manager to cease receiving data
-        self.websocket_manager.stop_websocket()
-
         # Close all open positions and cancel all orders for all symbols
         async with aiohttp.ClientSession() as session:
             await self._close_open_positions_and_cancel_orders_for_all_symbols(
@@ -106,9 +102,8 @@ class SzalaiStrategy:
         # Wait 2 seconds for the interval trigger thread to complete
         self.interval_trigger_thread.join(timeout=2.0)
 
-        # Not needed anymore, because the  _run_strategy() loop already got cancelled
-        # Close the session
-        # await self.session_manager.close_session()
+        # Stop the WebSocket manager to cease receiving data
+        self.websocket_manager.stop_websocket()
 
         self.logger.info("Szalai strategy has stopped.")
 
@@ -145,13 +140,13 @@ class SzalaiStrategy:
             name="IntervalTriggerThread")
         self.interval_trigger_thread.start()
 
-        # Start the WebSocket manager to receive real-time updates for market data and user data
-        # self.websocket_manager.start_websocket()
+        # Start the WebSocket manager
+        #self.websocket_manager.start_websocket()
 
         # Set up the WebSocket for user data to receive order updates and provide a handler for updates
-        # self.websocket_manager.setup_user_data_websocket(
-        #     self._update_order_data_handler           # Handler method to process order data updates
-        # )
+        self.websocket_manager.setup_user_data_websocket(
+            self._update_order_data_handler           
+        )
 
     async def _run_strategy(self) -> None:
         # Main strategy loop to continuously check and act upon various conditions until the stop event is set

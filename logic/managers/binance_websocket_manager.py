@@ -1,6 +1,6 @@
 from configs import szalai_strategy_config
 from logging import Logger
-from binance import ThreadedWebsocketManager
+from unicorn_binance_websocket_api import BinanceWebSocketApiManager
 from collections.abc import Callable
 from configs import binance_config
 
@@ -14,10 +14,15 @@ class BinanceWebsocketManager:
             logger (Logger): The logger instance used for logging debug information.
         """
         self.logger = logger
-        self.twm = ThreadedWebsocketManager(binance_config.API_KEY, binance_config.API_SECRET, testnet=binance_config.TESTNET)
+        self.ubwa = BinanceWebSocketApiManager(
+            exchange='binance.com-futures-testnet',
+            auto_data_cleanup_stopped_streams=True,
+            enable_stream_signal_buffer=True,
+            output_default='dict'
+        )
 
     def setup_futures_kline_multiplex_websocket(self, symbols: list[str], kline_interval: str, callback: Callable) -> None:
-        """Sets up a futures kline multiplex websocket for the given symbols and interval.
+        """Not implemented. Sets up a futures kline multiplex websocket for the given symbols and interval.
         
         Args:
             symbols (list[str]): A list of symbol strings to monitor.
@@ -29,7 +34,7 @@ class BinanceWebsocketManager:
         if szalai_strategy_config.LOG_DEBUG_DATA:
             self.logger.debug(f"Setting up futures websockets, streams: {', '.join(streams)}, callback: {callback.__name__}.")
         
-        self.twm.start_futures_multiplex_socket(callback=callback, streams=streams)
+        #self.twm.start_futures_multiplex_socket(callback=callback, streams=streams)
 
     def setup_user_data_websocket(self, callback: Callable) -> None:
         """Sets up a user data websocket.
@@ -40,21 +45,28 @@ class BinanceWebsocketManager:
         if szalai_strategy_config.LOG_DEBUG_DATA:
             self.logger.debug(f"Setting up futures user socket, callback: {callback.__name__}.")
         
-        self.twm.start_futures_user_socket(callback=callback)
+        self.ubwa.create_stream(
+            api_key=binance_config.API_KEY, 
+            api_secret=binance_config.API_SECRET,
+            channels=["arr"], 
+            markets=["!userData"],
+            stream_label="userData",
+            process_stream_data=callback
+        )
     
     def start_websocket(self) -> None:
         """Starts the websocket manager."""
         if szalai_strategy_config.LOG_DEBUG_DATA:
             self.logger.debug("Starting BinanceWebsocketManager.")
-            
-        self.twm.start()
+
+        self.ubwa.start()
 
     def stop_websocket(self) -> None:
         """Stops the websocket manager."""
         if szalai_strategy_config.LOG_DEBUG_DATA:
             self.logger.debug("Stopping BinanceWebsocketManager.")
 
-        self.twm.stop()
+        self.ubwa.stop_manager()
 
         
 

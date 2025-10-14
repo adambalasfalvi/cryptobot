@@ -28,10 +28,10 @@ RISK_USD = 150
 LEVERAGE = 10
 
 # Multiplier for calculating stop loss price in percentage
-STOP_LOSS_MULTIPLIER = Percentage(1)
+STOP_LOSS_MULTIPLIER = Percentage(0.01)
 
 # Multiplier for calculating take profit price in percentage
-TAKE_PROFIT_MULTIPLIER = Percentage(1)
+TAKE_PROFIT_MULTIPLIER = Percentage(0.01)
 
 # Time interval in seconds to wait before retrying the connection
 RETRY_INTERVAL = 5
