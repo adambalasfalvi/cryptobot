@@ -15,7 +15,7 @@ class BinanceWebsocketManager:
         """
         self.logger = logger
         self.ubwa = BinanceWebSocketApiManager(
-            exchange='binance.com-futures-testnet',
+            exchange=binance_config.EXCHANGE_STRING,
             auto_data_cleanup_stopped_streams=True,
             enable_stream_signal_buffer=True,
             output_default='dict'
@@ -35,6 +35,7 @@ class BinanceWebsocketManager:
             self.logger.debug(f"Setting up futures websockets, streams: {', '.join(streams)}, callback: {callback.__name__}.")
         
         #self.twm.start_futures_multiplex_socket(callback=callback, streams=streams)
+        raise NotImplementedError("Futures kline multiplex websocket setup is not implemented yet.")
 
     def setup_user_data_websocket(self, callback: Callable) -> None:
         """Sets up a user data websocket.

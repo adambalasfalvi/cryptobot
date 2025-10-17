@@ -12,5 +12,7 @@ TESTNET = True
 
 if TESTNET:
     BASE_URL = "https://testnet.binancefuture.com"
+    EXCHANGE_STRING = "binance.com-futures-testnet"
 else:
     BASE_URL = "https://fapi.binance.com"
+    EXCHANGE_STRING = "binance.com-futures"
