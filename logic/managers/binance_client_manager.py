@@ -2,6 +2,7 @@ import aiohttp
 import hmac
 import hashlib
 import numpy
+import requests
 from datetime import datetime
 from logging import Logger
 from binance import Client
@@ -197,26 +198,34 @@ class BinanceClientManager():
         if szalai_strategy_config.LOG_DEBUG_DATA:
             self.logger.debug(f"Creating buy stop market order, symbol: {symbol}, stop_price: {stop_price}.")
         
-        response = self.client.futures_create_order(
-            symbol=symbol, 
-            side=enums.SIDE_BUY, 
-            type=enums.FUTURE_ORDER_TYPE_STOP_MARKET, 
-            stopPrice=stop_price,
-            timeInForce=enums.TIME_IN_FORCE_GTC,
-            closePosition="true")
+        # Use Algo Order API endpoint (POST /fapi/v1/algoOrder) with algoType=CONDITIONAL
+        timestamp = int(datetime.now().timestamp() * 1000)
+        query_string = f"algoType=CONDITIONAL&symbol={symbol}&side=BUY&type=STOP_MARKET&triggerPrice={numpy.format_float_positional(stop_price)}&closePosition=true&newOrderRespType=RESULT&timestamp={timestamp}"
+        signature = hmac.new(
+            binance_config.API_SECRET.encode('utf-8'),
+            query_string.encode('utf-8'),
+            hashlib.sha256
+        ).hexdigest()
+        url = f"{binance_config.BASE_URL}/fapi/v1/algoOrder?{query_string}&signature={signature}"
+        headers = {"X-MBX-APIKEY": binance_config.API_KEY}
+        response = requests.post(url, headers=headers)
         
-        order_response = OrderResponse(
-            response["clientOrderId"], 
-            response["symbol"], 
-            response["status"], 
-            float(response["avgPrice"]), 
-            float(response["stopPrice"]),
-            float(response["origQty"]),
-            response["type"],
-            response["side"],
-            datetime.fromtimestamp(response["updateTime"]/1000)
-        )
-        return order_response
+        if response.status_code == 200:
+            data = response.json()
+            order_response = OrderResponse(
+                data["clientAlgoId"], 
+                data["symbol"], 
+                data["algoStatus"], 
+                0.0, 
+                float(data["triggerPrice"]),
+                float(data["quantity"]),
+                data["orderType"],
+                data["side"],
+                datetime.fromtimestamp(data["updateTime"]/1000)
+            )
+            return order_response
+        else:
+            raise Exception(f"Response status is {response.status_code}, response: {response.text}.")
         
     def futures_create_sell_stop_market_order(self, symbol: str, stop_price: float) -> OrderResponse:
         """Creates a futures sell stop market order.
@@ -231,26 +240,34 @@ class BinanceClientManager():
         if szalai_strategy_config.LOG_DEBUG_DATA:
             self.logger.debug(f"Creating sell stop market order, symbol: {symbol}, stop_price: {stop_price}.")
         
-        response = self.client.futures_create_order(
-            symbol=symbol, 
-            side=enums.SIDE_SELL, 
-            type=enums.FUTURE_ORDER_TYPE_STOP_MARKET, 
-            stopPrice=stop_price,
-            timeInForce=enums.TIME_IN_FORCE_GTC,
-            closePosition="true")
+        # Use Algo Order API endpoint (POST /fapi/v1/algoOrder) with algoType=CONDITIONAL
+        timestamp = int(datetime.now().timestamp() * 1000)
+        query_string = f"algoType=CONDITIONAL&symbol={symbol}&side=SELL&type=STOP_MARKET&triggerPrice={numpy.format_float_positional(stop_price)}&closePosition=true&newOrderRespType=RESULT&timestamp={timestamp}"
+        signature = hmac.new(
+            binance_config.API_SECRET.encode('utf-8'),
+            query_string.encode('utf-8'),
+            hashlib.sha256
+        ).hexdigest()
+        url = f"{binance_config.BASE_URL}/fapi/v1/algoOrder?{query_string}&signature={signature}"
+        headers = {"X-MBX-APIKEY": binance_config.API_KEY}
+        response = requests.post(url, headers=headers)
         
-        order_response = OrderResponse(
-            response["clientOrderId"], 
-            response["symbol"], 
-            response["status"], 
-            float(response["avgPrice"]), 
-            float(response["stopPrice"]),
-            float(response["origQty"]),
-            response["type"],
-            response["side"],
-            datetime.fromtimestamp(response["updateTime"]/1000)
-        )
-        return order_response
+        if response.status_code == 200:
+            data = response.json()
+            order_response = OrderResponse(
+                data["clientAlgoId"], 
+                data["symbol"], 
+                data["algoStatus"], 
+                0.0, 
+                float(data["triggerPrice"]),
+                float(data["quantity"]),
+                data["orderType"],
+                data["side"],
+                datetime.fromtimestamp(data["updateTime"]/1000)
+            )
+            return order_response
+        else:
+            raise Exception(f"Response status is {response.status_code}, response: {response.text}.")
         
     def futures_create_buy_take_profit_market_order(self, symbol: str, stop_price: float) -> OrderResponse:
         """Creates a futures buy take profit market order.
@@ -265,26 +282,34 @@ class BinanceClientManager():
         if szalai_strategy_config.LOG_DEBUG_DATA:
             self.logger.debug(f"Creating buy take profit market order, symbol: {symbol}, stop_price: {stop_price}.")
         
-        response = self.client.futures_create_order(
-            symbol=symbol, 
-            side=enums.SIDE_BUY, 
-            type=enums.FUTURE_ORDER_TYPE_TAKE_PROFIT_MARKET, 
-            stopPrice=stop_price,
-            timeInForce=enums.TIME_IN_FORCE_GTC,
-            closePosition="true")
+        # Use Algo Order API endpoint (POST /fapi/v1/algoOrder) with algoType=CONDITIONAL
+        timestamp = int(datetime.now().timestamp() * 1000)
+        query_string = f"algoType=CONDITIONAL&symbol={symbol}&side=BUY&type=TAKE_PROFIT_MARKET&triggerPrice={numpy.format_float_positional(stop_price)}&closePosition=true&newOrderRespType=RESULT&timestamp={timestamp}"
+        signature = hmac.new(
+            binance_config.API_SECRET.encode('utf-8'),
+            query_string.encode('utf-8'),
+            hashlib.sha256
+        ).hexdigest()
+        url = f"{binance_config.BASE_URL}/fapi/v1/algoOrder?{query_string}&signature={signature}"
+        headers = {"X-MBX-APIKEY": binance_config.API_KEY}
+        response = requests.post(url, headers=headers)
         
-        order_response = OrderResponse(
-            response["clientOrderId"], 
-            response["symbol"], 
-            response["status"], 
-            float(response["avgPrice"]), 
-            float(response["stopPrice"]),
-            float(response["origQty"]),
-            response["type"],
-            response["side"],
-            datetime.fromtimestamp(response["updateTime"]/1000)
-        )
-        return order_response
+        if response.status_code == 200:
+            data = response.json()
+            order_response = OrderResponse(
+                data["clientAlgoId"], 
+                data["symbol"], 
+                data["algoStatus"], 
+                0.0, 
+                float(data["triggerPrice"]),
+                float(data["quantity"]),
+                data["orderType"],
+                data["side"],
+                datetime.fromtimestamp(data["updateTime"]/1000)
+            )
+            return order_response
+        else:
+            raise Exception(f"Response status is {response.status_code}, response: {response.text}.")
         
     def futures_create_sell_take_profit_market_order(self, symbol: str, stop_price: float) -> OrderResponse:
         """Creates a futures sell take profit market order.
@@ -299,59 +324,34 @@ class BinanceClientManager():
         if szalai_strategy_config.LOG_DEBUG_DATA:
             self.logger.debug(f"Creating sell take profit market order, symbol: {symbol}, stop_price: {stop_price}.")
         
-        response = self.client.futures_create_order(
-            symbol=symbol, 
-            side=enums.SIDE_SELL, 
-            type=enums.FUTURE_ORDER_TYPE_TAKE_PROFIT_MARKET, 
-            stopPrice=stop_price,
-            timeInForce=enums.TIME_IN_FORCE_GTC,
-            closePosition="true")
+        # Use Algo Order API endpoint (POST /fapi/v1/algoOrder) with algoType=CONDITIONAL
+        timestamp = int(datetime.now().timestamp() * 1000)
+        query_string = f"algoType=CONDITIONAL&symbol={symbol}&side=SELL&type=TAKE_PROFIT_MARKET&triggerPrice={numpy.format_float_positional(stop_price)}&closePosition=true&newOrderRespType=RESULT&timestamp={timestamp}"
+        signature = hmac.new(
+            binance_config.API_SECRET.encode('utf-8'),
+            query_string.encode('utf-8'),
+            hashlib.sha256
+        ).hexdigest()
+        url = f"{binance_config.BASE_URL}/fapi/v1/algoOrder?{query_string}&signature={signature}"
+        headers = {"X-MBX-APIKEY": binance_config.API_KEY}
+        response = requests.post(url, headers=headers)
         
-        order_response = OrderResponse(
-            response["clientOrderId"], 
-            response["symbol"], 
-            response["status"], 
-            float(response["avgPrice"]), 
-            float(response["stopPrice"]),
-            float(response["origQty"]),
-            response["type"],
-            response["side"],
-            datetime.fromtimestamp(response["updateTime"]/1000)
-        )
-        return order_response
-    
-    def futures_cancel_order(self, symbol: str, order_id: str) -> dict:
-        """Cancels a specific futures order.
-
-        Args:
-            symbol (str): Trading symbol.
-            order_id (str): Order ID to cancel.
-
-        Returns:
-            dict: Response from the cancel order request.
-        """
-        response = self.client.futures_cancel_order(symbol=symbol, origClientOrderId=order_id)
-
-        if szalai_strategy_config.LOG_DEBUG_DATA:
-            self.logger.debug(f"Order {order_id} for symbol {symbol} has been cancelled.")
-        
-        return response
-    
-    def futures_cancel_all_open_orders(self, symbol: str) -> dict:
-        """Cancels all open futures orders for a given symbol.
-
-        Args:
-            symbol (str): Trading symbol.
-
-        Returns:
-            dict: Response from the cancel order request.
-        """
-        response = self.client.futures_cancel_all_open_orders(symbol=symbol)
-
-        if szalai_strategy_config.LOG_DEBUG_DATA:
-            self.logger.debug(f"All open future orders for symbol {symbol} have been cancelled.")
-        
-        return response
+        if response.status_code == 200:
+            data = response.json()
+            order_response = OrderResponse(
+                data["clientAlgoId"], 
+                data["symbol"], 
+                data["algoStatus"], 
+                0.0, 
+                float(data["triggerPrice"]),
+                float(data["quantity"]),
+                data["orderType"],
+                data["side"],
+                datetime.fromtimestamp(data["updateTime"]/1000)
+            )
+            return order_response
+        else:
+            raise Exception(f"Response status is {response.status_code}, response: {response.text}.")
         
     def futures_change_leverage(self, symbol: str, leverage: int) -> dict:
         """Changes the leverage for a given symbol.
@@ -507,12 +507,12 @@ class BinanceClientManager():
             else:
                 raise Exception(f"Response status is {response.status}, response: {await response.text()}.")
 
-    async def async_futures_cancel_order(self, symbol: str, order_id: str, session: aiohttp.ClientSession) -> dict:
-        """Asynchronously cancels a specific futures order.
+    async def async_futures_cancel_algo_order(self, symbol: str, client_algo_id: str, session: aiohttp.ClientSession) -> dict:
+        """Asynchronously cancels a single open algo order (TP/SL conditional order) by clientAlgoId.
 
         Args:
             symbol (str): Trading symbol.
-            order_id (str): Order ID to cancel.
+            client_algo_id (str): The clientAlgoId of the algo order to cancel.
             session (aiohttp.ClientSession): Active aiohttp client session for making requests.
 
         Returns:
@@ -520,7 +520,7 @@ class BinanceClientManager():
         """
         timestamp = int(datetime.now().timestamp() * 1000)
 
-        query_string = f"symbol={symbol}&origClientOrderId={order_id}&timestamp={timestamp}"
+        query_string = f"symbol={symbol}&clientAlgoId={client_algo_id}&timestamp={timestamp}"
 
         signature = hmac.new(
             binance_config.API_SECRET.encode('utf-8'),
@@ -528,14 +528,14 @@ class BinanceClientManager():
             hashlib.sha256
         ).hexdigest()
 
-        url = f"{binance_config.BASE_URL}/fapi/v1/order?{query_string}&signature={signature}"
+        url = f"{binance_config.BASE_URL}/fapi/v1/algoOrder?{query_string}&signature={signature}"
 
         headers = {
             "X-MBX-APIKEY": binance_config.API_KEY
         }
 
         if szalai_strategy_config.LOG_DEBUG_DATA:
-            self.logger.debug(f"Cancelling order {order_id} for symbol {symbol}, url: {url}.")
+            self.logger.debug(f"Cancelling algo order {client_algo_id} for symbol {symbol}, url: {url}.")
 
         async with session.delete(url, headers=headers) as response:
             if response.status == 200:
@@ -543,11 +543,9 @@ class BinanceClientManager():
                 return data
             else:
                 raise Exception(f"Response status is {response.status}, response: {await response.text()}.")
-        
-        return response
 
-    async def async_futures_cancel_all_open_orders(self, symbol: str, session: aiohttp.ClientSession) -> dict:
-        """Asynchronously cancels all open futures orders for a given symbol.
+    async def async_futures_cancel_all_algo_open_orders(self, symbol: str, session: aiohttp.ClientSession) -> dict:
+        """Asynchronously cancels all open algo orders (TP/SL conditional orders) for a given symbol.
 
         Args:
             symbol (str): Trading symbol.
@@ -566,14 +564,14 @@ class BinanceClientManager():
             hashlib.sha256
         ).hexdigest()
 
-        url = f"{binance_config.BASE_URL}/fapi/v1/allOpenOrders?{query_string}&signature={signature}"
+        url = f"{binance_config.BASE_URL}/fapi/v1/algoOpenOrders?{query_string}&signature={signature}"
 
         headers = {
             "X-MBX-APIKEY": binance_config.API_KEY
         }
 
         if szalai_strategy_config.LOG_DEBUG_DATA:
-            self.logger.debug(f"Cancelling all open orders for symbol {symbol}, url: {url}.")
+            self.logger.debug(f"Cancelling all algo open orders for symbol {symbol}, url: {url}.")
 
         async with session.delete(url, headers=headers) as response:
             if response.status == 200:
@@ -581,8 +579,6 @@ class BinanceClientManager():
                 return data
             else:
                 raise Exception(f"Response status is {response.status}, response: {await response.text()}.")
-        
-        return response
     
     async def async_futures_get_kline_data(self, symbol: str, interval: str, limit: int, session: aiohttp.ClientSession, startTime: Optional[datetime] = None, endTime: Optional[datetime] = None) -> list:
         """Asynchronously retrieves kline (candlestick) data for a specific symbol.
@@ -741,8 +737,8 @@ class BinanceClientManager():
         # Get the current timestamp in milliseconds
         timestamp = int(datetime.now().timestamp() * 1000)
 
-        # Prepare the query string
-        query_string = f"symbol={symbol}&side=BUY&type=TAKE_PROFIT_MARKET&stopPrice={numpy.format_float_positional(stop_price)}&closePosition=true&newOrderRespType=RESULT&timestamp={timestamp}"
+        # Prepare the query string - Use Algo Order API with algoType=CONDITIONAL
+        query_string = f"algoType=CONDITIONAL&symbol={symbol}&side=BUY&type=TAKE_PROFIT_MARKET&triggerPrice={numpy.format_float_positional(stop_price)}&closePosition=true&newOrderRespType=RESULT&timestamp={timestamp}"
 
         # Generate the HMAC SHA256 signature
         signature = hmac.new(
@@ -752,7 +748,7 @@ class BinanceClientManager():
         ).hexdigest()
 
         # Set the URL
-        url = f"{binance_config.BASE_URL}/fapi/v1/order?{query_string}&signature={signature}"
+        url = f"{binance_config.BASE_URL}/fapi/v1/algoOrder?{query_string}&signature={signature}"
 
         # Set the headers
         headers = {
@@ -766,13 +762,13 @@ class BinanceClientManager():
             if response.status == 200:
                 data = await response.json()
                 order_response = OrderResponse(
-                    data["clientOrderId"], 
+                    data["clientAlgoId"], 
                     data["symbol"], 
-                    data["status"], 
-                    float(data["avgPrice"]), 
-                    float(data["stopPrice"]),
-                    float(data["origQty"]),
-                    data["type"],
+                    data["algoStatus"], 
+                    0.0, 
+                    float(data["triggerPrice"]),
+                    float(data["quantity"]),
+                    data["orderType"],
                     data["side"],
                     datetime.fromtimestamp(data["updateTime"]/1000)
                 )
@@ -793,8 +789,8 @@ class BinanceClientManager():
         # Get the current timestamp in milliseconds
         timestamp = int(datetime.now().timestamp() * 1000)
 
-        # Prepare the query string
-        query_string = f"symbol={symbol}&side=SELL&type=TAKE_PROFIT_MARKET&stopPrice={numpy.format_float_positional(stop_price)}&closePosition=true&newOrderRespType=RESULT&timestamp={timestamp}"
+        # Prepare the query string - Use Algo Order API with algoType=CONDITIONAL
+        query_string = f"algoType=CONDITIONAL&symbol={symbol}&side=SELL&type=TAKE_PROFIT_MARKET&triggerPrice={numpy.format_float_positional(stop_price)}&closePosition=true&newOrderRespType=RESULT&timestamp={timestamp}"
 
         # Generate the HMAC SHA256 signature
         signature = hmac.new(
@@ -804,7 +800,7 @@ class BinanceClientManager():
         ).hexdigest()
 
         # Set the URL
-        url = f"{binance_config.BASE_URL}/fapi/v1/order?{query_string}&signature={signature}"
+        url = f"{binance_config.BASE_URL}/fapi/v1/algoOrder?{query_string}&signature={signature}"
 
         # Set the headers
         headers = {
@@ -818,13 +814,13 @@ class BinanceClientManager():
             if response.status == 200:
                 data = await response.json()
                 order_response = OrderResponse(
-                    data["clientOrderId"], 
+                    data["clientAlgoId"], 
                     data["symbol"], 
-                    data["status"], 
-                    float(data["avgPrice"]), 
-                    float(data["stopPrice"]),
-                    float(data["origQty"]),
-                    data["type"],
+                    data["algoStatus"], 
+                    0.0, 
+                    float(data["triggerPrice"]),
+                    float(data["quantity"]),
+                    data["orderType"],
                     data["side"],
                     datetime.fromtimestamp(data["updateTime"]/1000)
                 )
@@ -845,8 +841,8 @@ class BinanceClientManager():
         # Get the current timestamp in milliseconds
         timestamp = int(datetime.now().timestamp() * 1000)
 
-        # Prepare the query string
-        query_string = f"symbol={symbol}&side=BUY&type=STOP_MARKET&stopPrice={numpy.format_float_positional(stop_price)}&closePosition=true&newOrderRespType=RESULT&timestamp={timestamp}"
+        # Prepare the query string - Use Algo Order API with algoType=CONDITIONAL
+        query_string = f"algoType=CONDITIONAL&symbol={symbol}&side=BUY&type=STOP_MARKET&triggerPrice={numpy.format_float_positional(stop_price)}&closePosition=true&newOrderRespType=RESULT&timestamp={timestamp}"
 
         # Generate the HMAC SHA256 signature
         signature = hmac.new(
@@ -856,7 +852,7 @@ class BinanceClientManager():
         ).hexdigest()
 
         # Set the URL
-        url = f"{binance_config.BASE_URL}/fapi/v1/order?{query_string}&signature={signature}"
+        url = f"{binance_config.BASE_URL}/fapi/v1/algoOrder?{query_string}&signature={signature}"
 
         # Set the headers
         headers = {
@@ -870,13 +866,13 @@ class BinanceClientManager():
             if response.status == 200:
                 data = await response.json()
                 order_response = OrderResponse(
-                    data["clientOrderId"], 
+                    data["clientAlgoId"], 
                     data["symbol"], 
-                    data["status"], 
-                    float(data["avgPrice"]), 
-                    float(data["stopPrice"]),
-                    float(data["origQty"]),
-                    data["type"],
+                    data["algoStatus"], 
+                    0.0, 
+                    float(data["triggerPrice"]),
+                    float(data["quantity"]),
+                    data["orderType"],
                     data["side"],
                     datetime.fromtimestamp(data["updateTime"]/1000)
                 )
@@ -897,8 +893,8 @@ class BinanceClientManager():
         # Get the current timestamp in milliseconds
         timestamp = int(datetime.now().timestamp() * 1000)
 
-        # Prepare the query string
-        query_string = f"symbol={symbol}&side=SELL&type=STOP_MARKET&stopPrice={numpy.format_float_positional(stop_price)}&closePosition=true&newOrderRespType=RESULT&timestamp={timestamp}"
+        # Prepare the query string - Use Algo Order API with algoType=CONDITIONAL
+        query_string = f"algoType=CONDITIONAL&symbol={symbol}&side=SELL&type=STOP_MARKET&triggerPrice={numpy.format_float_positional(stop_price)}&closePosition=true&newOrderRespType=RESULT&timestamp={timestamp}"
 
         # Generate the HMAC SHA256 signature
         signature = hmac.new(
@@ -908,7 +904,7 @@ class BinanceClientManager():
         ).hexdigest()
 
         # Set the URL
-        url = f"{binance_config.BASE_URL}/fapi/v1/order?{query_string}&signature={signature}"
+        url = f"{binance_config.BASE_URL}/fapi/v1/algoOrder?{query_string}&signature={signature}"
 
         # Set the headers
         headers = {
@@ -922,19 +918,20 @@ class BinanceClientManager():
             if response.status == 200:
                 data = await response.json()
                 order_response = OrderResponse(
-                    data["clientOrderId"], 
+                    data["clientAlgoId"], 
                     data["symbol"], 
-                    data["status"], 
-                    float(data["avgPrice"]), 
-                    float(data["stopPrice"]),
-                    float(data["origQty"]),
-                    data["type"],
+                    data["algoStatus"], 
+                    0.0, 
+                    float(data["triggerPrice"]),
+                    float(data["quantity"]),
+                    data["orderType"],
                     data["side"],
                     datetime.fromtimestamp(data["updateTime"]/1000)
                 )
                 return order_response
             else:
                 raise Exception(f"Response status is {response.status}, response: {await response.text()}.")
+
             
     async def async_futures_get_account_trade_data(self, symbol: str, order_id: int, session: aiohttp.ClientSession) -> dict:
         """Asynchronously retrieves account trade data for a specific symbol and order ID.
