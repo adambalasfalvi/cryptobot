@@ -11,7 +11,7 @@ API_SECRET = "H5oFkp3KhvJMMSykmlqRNFHtbuxEkMQIvvYHauQ1psXcrz7riP3gbR4grM39ZAC7"
 TESTNET = True
 
 if TESTNET:
-    BASE_URL = "https://testnet.binancefuture.com"
+    BASE_URL = "https://demo-fapi.binance.com"
     EXCHANGE_STRING = "binance.com-futures-testnet"
 else:
     BASE_URL = "https://fapi.binance.com"
