@@ -116,6 +116,9 @@ class SzalaiStrategy:
         # Log the start of the strategy execution
         self.logger.info("Starting Szalai strategy.")
 
+        if szalai_strategy_config.TEST_MODE:
+            self.logger.warning("TEST_MODE is enabled. Orders will be logged but not executed.")
+
         # Initialize session
         self.session_manager.create_session()
 
@@ -176,8 +179,12 @@ class SzalaiStrategy:
                         self._calculate_quantity()
                         order_error_code = await self._set_up_orders()
                         if order_error_code == OrderErrorCode.SUCCESS:
-                            self.logger.info("Updating state to TRADE.")
-                            self.state = State.TRADE
+                            if szalai_strategy_config.TEST_MODE:
+                                self.logger.info("[TEST MODE] Updating state to NO_TRADE.")
+                                self.state = State.NO_TRADE
+                            else:
+                                self.logger.info("Updating state to TRADE.")
+                                self.state = State.TRADE
                         elif order_error_code == OrderErrorCode.POSITION_ORDER_FAILED:
                             await self._close_open_position_for_symbol(self.trading_symbol, self.session_manager.get_session())
                             self.logger.info("Updating state to ERROR_AT_TAKING_POSITION_AND_ORDERS.")
@@ -286,25 +293,118 @@ class SzalaiStrategy:
         """
         Calculates what will be the side to begin with if a new symbol has been chosen.
 
-        This method retrieves the historical kline data for the trading symbol and determines the starting side.
-        If the price has increased (close price is higher than open price), the starting side will be SHORT.
-        If the price has declined (close price is lower than open price), the starting side will be LONG.
+        This method uses buy/sell aggression and orderflow dominance scoring to determine
+        the starting side. Falls back to kline-based logic if scores are neutral.
         If the REVERSE_FIRST_ORDER_SIDE config is set to True, the side will be reversed.
         """   
-        symbol_kline_data = next(kline_data for kline_data in self.kline_data_list if kline_data.symbol == self.trading_symbol)
+        session = self.session_manager.get_session()
 
-        # If price has increased
-        if symbol_kline_data.open_price - symbol_kline_data.close_price < 0:
-            self.side = Side.SHORT
-        # If declined
-        else:
+        # Calculate scores from market data
+        aggression_score = await self._calculate_buy_sell_aggression_score(self.trading_symbol, session)
+        orderflow_score = await self._calculate_orderflow_dominance_score(self.trading_symbol, session)
+        total_score = aggression_score + orderflow_score
+
+        self.logger.info(
+            f"Score calculation for {self.trading_symbol}: "
+            f"aggression_score={aggression_score}, orderflow_score={orderflow_score}, total_score={total_score}."
+        )
+
+        if total_score > 0:
             self.side = Side.LONG
+        elif total_score < 0:
+            self.side = Side.SHORT
+        else:
+            # Fallback to kline-based logic when scores are neutral
+            symbol_kline_data = next(kline_data for kline_data in self.kline_data_list if kline_data.symbol == self.trading_symbol)
+            if symbol_kline_data.open_price - symbol_kline_data.close_price < 0:
+                self.side = Side.SHORT
+            else:
+                self.side = Side.LONG
 
         if szalai_strategy_config.REVERSE_FIRST_ORDER_SIDE:
             self.logger.info("The REVERSE_FIRST_ORDER_SIDE config is set to True. The side will be reversed.")
             self.side = Side.LONG if self.side == Side.SHORT else Side.SHORT
     
         self.logger.info(f"The calculated first trading side is {self.side}.")
+
+    async def _calculate_buy_sell_aggression_score(self, symbol: str, session: aiohttp.ClientSession) -> int:
+        """
+        Calculates the buy/sell aggression score based on recent trades.
+
+        Compares buyer-initiated vs seller-initiated volume.
+        ratio > 1.2 → bullish (+1), ratio < 0.8 → bearish (-1), else neutral (0).
+
+        Args:
+            symbol (str): Trading symbol.
+            session (aiohttp.ClientSession): Active aiohttp client session.
+
+        Returns:
+            int: +1 (bullish), -1 (bearish), or 0 (neutral).
+        """
+        trades = await self.client_manager.async_futures_get_recent_trades(symbol, session)
+
+        buy_volume = 0.0
+        sell_volume = 0.0
+
+        for trade in trades:
+            qty = float(trade["qty"])
+            if trade["isBuyerMaker"]:
+                sell_volume += qty
+            else:
+                buy_volume += qty
+
+        if sell_volume == 0:
+            ratio = float('inf') if buy_volume > 0 else 1.0
+        else:
+            ratio = buy_volume / sell_volume
+
+        if szalai_strategy_config.LOG_DEBUG_DATA:
+            self.logger.debug(
+                f"Buy/Sell aggression for {symbol}: buy_volume={round(buy_volume, 4)}, "
+                f"sell_volume={round(sell_volume, 4)}, ratio={round(ratio, 4)}."
+            )
+
+        if ratio > 1.2:
+            return 1
+        elif ratio < 0.8:
+            return -1
+        return 0
+
+    async def _calculate_orderflow_dominance_score(self, symbol: str, session: aiohttp.ClientSession) -> int:
+        """
+        Calculates the orderflow dominance score based on the order book.
+
+        Compares total bid liquidity vs total ask liquidity.
+        ratio > 1.2 → bullish (+1), ratio < 0.8 → bearish (-1), else neutral (0).
+
+        Args:
+            symbol (str): Trading symbol.
+            session (aiohttp.ClientSession): Active aiohttp client session.
+
+        Returns:
+            int: +1 (bullish), -1 (bearish), or 0 (neutral).
+        """
+        order_book = await self.client_manager.async_futures_get_order_book(symbol, session)
+
+        bid_liquidity = sum(float(level[1]) for level in order_book["bids"])
+        ask_liquidity = sum(float(level[1]) for level in order_book["asks"])
+
+        if ask_liquidity == 0:
+            ratio = float('inf') if bid_liquidity > 0 else 1.0
+        else:
+            ratio = bid_liquidity / ask_liquidity
+
+        if szalai_strategy_config.LOG_DEBUG_DATA:
+            self.logger.debug(
+                f"Orderflow dominance for {symbol}: bid_liquidity={round(bid_liquidity, 4)}, "
+                f"ask_liquidity={round(ask_liquidity, 4)}, ratio={round(ratio, 4)}."
+            )
+
+        if ratio > 1.2:
+            return 1
+        elif ratio < 0.8:
+            return -1
+        return 0
     
     def _get_precision_information_for_symbols(self) -> None:
         """Get precision information for all symbols concurrently."""
@@ -641,6 +741,11 @@ class SzalaiStrategy:
             OrderErrorCode: Indicates success or the specific failure point
         """
         self.logger.info(f"Setting up orders for symbol {self.trading_symbol}.")
+
+        # Test mode: log order details without executing
+        if szalai_strategy_config.TEST_MODE:
+            return self._log_test_mode_orders()
+
         # TODO: check if there is enough balance to place the order
 
         # Get the optimized session from session manager
@@ -691,6 +796,35 @@ class SzalaiStrategy:
         except Exception as e:
             self.logger.error(f"Error setting up orders for symbol {self.trading_symbol}: {e}")
             return OrderErrorCode.UNKNOWN_ERROR
+
+    def _log_test_mode_orders(self) -> OrderErrorCode:
+        """
+        Logs the orders that would be placed without actually executing them.
+        Used when TEST_MODE is enabled.
+
+        Returns:
+            OrderErrorCode: Always returns SUCCESS.
+        """
+        price_precision = next(symbol_info.price_precision for symbol_info in self.symbol_info_list if symbol_info.symbol == self.trading_symbol)
+        estimated_price = self.trading_symbol_kline_data.close_price
+        tp_price = round(self._calculate_take_profit_price(estimated_price, self.side), price_precision)
+        sl_price = round(self._calculate_stop_loss_price(estimated_price, self.side), price_precision)
+
+        self.logger.info(
+            f"[TEST MODE] Would place POSITION order: "
+            f"symbol={self.trading_symbol}, side={self.side.name}, "
+            f"quantity={self.trading_symbol_quantity}, estimated_price={numpy.format_float_positional(estimated_price)}."
+        )
+        self.logger.info(
+            f"[TEST MODE] Would place TAKE PROFIT order: "
+            f"symbol={self.trading_symbol}, price={numpy.format_float_positional(tp_price)}."
+        )
+        self.logger.info(
+            f"[TEST MODE] Would place STOP LOSS order: "
+            f"symbol={self.trading_symbol}, price={numpy.format_float_positional(sl_price)}."
+        )
+
+        return OrderErrorCode.SUCCESS
 
     def _calculate_quantity(self) -> None:
         """

@@ -50,3 +50,6 @@ LOG_KLINE_DATA = False
 
 # Reverse the first order side of the strategy
 REVERSE_FIRST_ORDER_SIDE = False
+
+# Enable test mode - logs orders without executing them
+TEST_MODE = True

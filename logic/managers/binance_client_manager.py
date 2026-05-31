@@ -932,7 +932,52 @@ class BinanceClientManager():
             else:
                 raise Exception(f"Response status is {response.status}, response: {await response.text()}.")
 
-            
+    async def async_futures_get_recent_trades(self, symbol: str, session: aiohttp.ClientSession, limit: int = 1000) -> list:
+        """Asynchronously retrieves recent market trades for a symbol.
+
+        Args:
+            symbol (str): Trading symbol.
+            session (aiohttp.ClientSession): Active aiohttp client session for making requests.
+            limit (int): Number of trades to retrieve (max 1000).
+
+        Returns:
+            list: List of recent trade dicts with keys: id, price, qty, quoteQty, time, isBuyerMaker.
+        """
+        url = f"{binance_config.BASE_URL}/fapi/v1/trades?symbol={symbol}&limit={limit}"
+
+        if szalai_strategy_config.LOG_DEBUG_DATA:
+            self.logger.debug(f"Getting recent trades for {symbol}, limit: {limit}, url: {url}.")
+
+        async with session.get(url) as response:
+            if response.status == 200:
+                data = await response.json()
+                return data
+            else:
+                raise Exception(f"Response status is {response.status}, response: {await response.text()}.")
+
+    async def async_futures_get_order_book(self, symbol: str, session: aiohttp.ClientSession, limit: int = 20) -> dict:
+        """Asynchronously retrieves the order book (depth) for a symbol.
+
+        Args:
+            symbol (str): Trading symbol.
+            session (aiohttp.ClientSession): Active aiohttp client session for making requests.
+            limit (int): Number of price levels (valid: 5, 10, 20, 50, 100, 500, 1000).
+
+        Returns:
+            dict: Order book with keys: lastUpdateId, E, T, bids, asks.
+        """
+        url = f"{binance_config.BASE_URL}/fapi/v1/depth?symbol={symbol}&limit={limit}"
+
+        if szalai_strategy_config.LOG_DEBUG_DATA:
+            self.logger.debug(f"Getting order book for {symbol}, limit: {limit}, url: {url}.")
+
+        async with session.get(url) as response:
+            if response.status == 200:
+                data = await response.json()
+                return data
+            else:
+                raise Exception(f"Response status is {response.status}, response: {await response.text()}.")
+
     async def async_futures_get_account_trade_data(self, symbol: str, order_id: int, session: aiohttp.ClientSession) -> dict:
         """Asynchronously retrieves account trade data for a specific symbol and order ID.
 
